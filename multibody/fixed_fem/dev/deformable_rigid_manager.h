@@ -16,12 +16,32 @@
 #include "drake/multibody/fixed_fem/dev/deformable_rigid_contact_pair.h"
 #include "drake/multibody/fixed_fem/dev/fem_solver.h"
 #include "drake/multibody/fixed_fem/dev/schur_complement.h"
+#include "drake/multibody/fixed_fem/dev/velocity_newmark_scheme.h"
 #include "drake/multibody/plant/contact_jacobians.h"
 #include "drake/multibody/plant/discrete_update_manager.h"
 
 namespace drake {
 namespace multibody {
 namespace fem {
+
+namespace internal {
+/* Struct to hold data (friction, signed distance-like value, stiffness, and
+ damping) at each contact point in DeformableRigidManager. */
+template <typename T>
+struct ContactPointData {
+  VectorX<T> mu;
+  VectorX<T> phi0;
+  VectorX<T> stiffness;
+  VectorX<T> damping;
+  void Resize(int size) {
+    mu.resize(size);
+    phi0.resize(size);
+    stiffness.resize(size);
+    damping.resize(size);
+  }
+};
+}  // namespace internal
+
 /** %DeformableRigidManager implements the interface in DiscreteUpdateManager
  and performs discrete update for deformable and rigid bodies with a two-way
  coupling scheme.
@@ -32,13 +52,23 @@ class DeformableRigidManager final
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(DeformableRigidManager)
 
-  DeformableRigidManager() = default;
+  /** Constructs a %DeformableRigidManager that takes ownership of the given
+   `contact_solver` to solve for contacts.
+   @pre contact_solver != nullptr. */
+  DeformableRigidManager(
+      std::unique_ptr<multibody::contact_solvers::internal::ContactSolver<T>>
+          contact_solver)
+      : contact_solver_(std::move(contact_solver)) {
+    DRAKE_DEMAND(contact_solver_ != nullptr);
+  }
 
   /** Sets the given `contact_solver` as the solver that `this`
-    %DeformableRigidManager uses to solve contact. */
+   %DeformableRigidManager uses to solve contact.
+   @pre contact_solver != nullptr. */
   void SetContactSolver(
       std::unique_ptr<multibody::contact_solvers::internal::ContactSolver<T>>
           contact_solver) {
+    DRAKE_DEMAND(contact_solver != nullptr);
     contact_solver_ = std::move(contact_solver);
   }
 
@@ -83,19 +113,13 @@ class DeformableRigidManager final
       const geometry::SceneGraph<T>& scene_graph) const;
 
  private:
-  /* Struct to hold data (friction, signed distance-like value, stiffness, and
-   damping) at each contact point. */
-  struct ContactPointData {
-    VectorX<T> mu;
-    VectorX<T> phi0;
-    VectorX<T> stiffness;
-    VectorX<T> damping;
-    void Resize(int size) {
-      mu.resize(size);
-      phi0.resize(size);
-      stiffness.resize(size);
-      damping.resize(size);
-    }
+  template <typename Scalar, int Options = 0, typename StorageIndex = int>
+  /* Wrapper around Eigen::SparseMatrix to avoid non-type template parameters
+   that trigger typename hasher to spew warning messages to the console in a
+   simulation. */
+  struct EigenSparseMatrix {
+    using NonTypeTemplateParameter = std::integral_constant<int, Options>;
+    Eigen::SparseMatrix<Scalar, Options, StorageIndex> data;
   };
 
   friend class DeformableRigidManagerTest;
@@ -144,24 +168,20 @@ class DeformableRigidManager final
       const systems::Context<T>& context,
       contact_solvers::internal::ContactSolverResults<T>* results) const;
 
-  /* Calculates all contact quantities needed by the contact solver and the
-   TAMSI solver from the given `context` and `rigid_contact_pairs`.
-   @pre All pointer parameters are non-null.
-   @pre The size of `v` and `minus_tau` are equal to the number of rigid
-        generalized velocities.
-   @pre `M` is square and has rows and columns equal to the number of rigid
-        generalized velocities.
-   @pre `mu`, `phi`, `fn`, `stiffness`, `damping`, and `rigid_contact_pairs`
-        have the same size. */
-  void CalcContactQuantities(
+  /* Eval version of CalcDeformableContactSolverResults(). */
+  const contact_solvers::internal::ContactSolverResults<T>&
+  EvalDeformableContactSolverResults(const systems::Context<T>& context) const {
+    return this->plant()
+        .get_cache_entry(deformable_contact_solver_results_cache_index_)
+        .template Eval<contact_solvers::internal::ContactSolverResults<T>>(
+            context);
+  }
+
+  /* Calculates the contact solver results for the deformable dofs only. */
+  void CalcDeformableContactSolverResults(
       const systems::Context<T>& context,
-      const std::vector<multibody::internal::DiscreteContactPair<T>>&
-          rigid_contact_pairs,
-      multibody::internal::ContactJacobians<T>* rigid_contact_jacobians,
-      EigenPtr<VectorX<T>> v, EigenPtr<MatrixX<T>> M,
-      EigenPtr<VectorX<T>> minus_tau, EigenPtr<VectorX<T>> mu,
-      EigenPtr<VectorX<T>> phi, EigenPtr<VectorX<T>> fn,
-      EigenPtr<VectorX<T>> stiffness, EigenPtr<VectorX<T>> damping) const;
+      contact_solvers::internal::ContactSolverResults<T>* deformable_results)
+      const;
 
   // TODO(xuchenhan-tri): Implement this once AccelerationKinematicsCache
   //  also caches acceleration for deformable dofs.
@@ -203,19 +223,35 @@ class DeformableRigidManager final
                                   DeformableBodyIndex id,
                                   FemStateBase<T>* fem_state_star) const;
 
+  /* Eval version of CalcNextFemStateBase(). */
+  const FemStateBase<T>& EvalNextFemStateBase(
+      const systems::Context<T>& context,
+      DeformableBodyIndex body_index) const {
+    return this->plant()
+        .get_cache_entry(next_fem_state_cache_indexes_[body_index])
+        .template Eval<FemStateBase<T>>(context);
+  }
+
+  /* Calculates the FEM state at the next time step for the deformable body with
+   the given `body_index`. */
+  void CalcNextFemStateBase(const systems::Context<T>& context,
+                            DeformableBodyIndex body_index,
+                            FemStateBase<T>* fem_state) const;
+
   /* Eval version of CalcFreeMotionTangentMatrix(). */
   const Eigen::SparseMatrix<T>& EvalFreeMotionTangentMatrix(
       const systems::Context<T>& context, DeformableBodyIndex index) const {
     return this->plant()
         .get_cache_entry(tangent_matrix_cache_indexes_[index])
-        .template Eval<Eigen::SparseMatrix<T>>(context);
+        .template Eval<EigenSparseMatrix<T>>(context)
+        .data;
   }
 
   /* Calculates the tangent matrix of the deformable body with the given `index`
    at free motion state. */
-  void CalcFreeMotionTangentMatrix(
-      const systems::Context<T>& context, DeformableBodyIndex index,
-      Eigen::SparseMatrix<T>* tangent_matrix) const;
+  void CalcFreeMotionTangentMatrix(const systems::Context<T>& context,
+                                   DeformableBodyIndex index,
+                                   EigenSparseMatrix<T>* tangent_matrix) const;
 
   /* Eval version of CalcFreeMotionTangentMatrixSchurComplement(). */
   const internal::SchurComplement<T>&
@@ -342,11 +378,11 @@ class DeformableRigidManager final
       const internal::DeformableContactData<T>& contact_data) const;
 
   /* Eval version of CalcContactPointData(). */
-  const ContactPointData& EvalContactPointData(
+  const internal::ContactPointData<T>& EvalContactPointData(
       const systems::Context<T>& context) const {
     return this->plant()
         .get_cache_entry(contact_point_data_cache_index_)
-        .template Eval<ContactPointData>(context);
+        .template Eval<internal::ContactPointData<T>>(context);
   }
 
   /* Calculates the combined friction, stiffness, damping, and penetration
@@ -355,8 +391,9 @@ class DeformableRigidManager final
    of CalcContactJacobian(). In particular, the i-th entry in the
    `contact_point_data` corresponds to the contact point associated with the
    3*i, 3*i+1, and 3*i+2-th rows in the result of CalcContactJacobian(). */
-  void CalcContactPointData(const systems::Context<T>& context,
-                            ContactPointData* contact_point_data) const;
+  void CalcContactPointData(
+      const systems::Context<T>& context,
+      internal::ContactPointData<T>* contact_point_data) const;
 
   /* Eval version of CalcContactTangentMatrix(). */
   const contact_solvers::internal::BlockSparseMatrix<T>&
@@ -470,6 +507,7 @@ class DeformableRigidManager final
   /* Cached FEM state quantities. */
   std::vector<systems::CacheIndex> fem_state_cache_indexes_;
   std::vector<systems::CacheIndex> free_motion_cache_indexes_;
+  std::vector<systems::CacheIndex> next_fem_state_cache_indexes_;
   std::vector<systems::CacheIndex> tangent_matrix_cache_indexes_;
   std::vector<systems::CacheIndex>
       tangent_matrix_schur_complement_cache_indexes_;
@@ -489,10 +527,14 @@ class DeformableRigidManager final
   systems::CacheIndex participating_free_motion_velocities_cache_index_;
   /* Cached two-way coupled contact solver results. */
   systems::CacheIndex two_way_coupled_contact_solver_results_cache_index_;
+  /* Cached contact solver results for deformable dofs only. */
+  systems::CacheIndex deformable_contact_solver_results_cache_index_;
+
   /* Solvers for all deformable bodies. */
   std::vector<std::unique_ptr<FemSolver<T>>> fem_solvers_{};
   std::unique_ptr<multibody::contact_solvers::internal::ContactSolver<T>>
       contact_solver_{nullptr};
+  std::unique_ptr<internal::VelocityNewmarkScheme<T>> velocity_newmark_;
 
   /* Geometries temporarily managed by DeformableRigidManager. In the future,
    SceneGraph will manage all the geometries. */

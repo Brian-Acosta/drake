@@ -303,6 +303,11 @@ const auto& GetElementByName(
 }  // namespace
 
 template <typename T>
+int MultibodyTree<T>::NumBodiesWithName(std::string_view name) const {
+  return static_cast<int>(body_name_to_index_.count(name));
+}
+
+template <typename T>
 bool MultibodyTree<T>::HasBodyNamed(std::string_view name) const {
   return HasElementNamed(*this, name, std::nullopt, body_name_to_index_);
 }
@@ -383,6 +388,19 @@ std::vector<JointIndex> MultibodyTree<T>::GetJointIndices(
   for (auto& joint : owned_joints_) {
     if (joint->model_instance() == model_instance) {
       indices.emplace_back(joint->index());
+    }
+  }
+  return indices;
+}
+
+template <typename T>
+std::vector<FrameIndex> MultibodyTree<T>::GetFrameIndices(
+    ModelInstanceIndex model_instance) const {
+  DRAKE_THROW_UNLESS(model_instance < instance_name_to_index_.size());
+  std::vector<FrameIndex> indices;
+  for (auto& frame : frames_) {
+    if (frame->model_instance() == model_instance) {
+      indices.emplace_back(frame->index());
     }
   }
   return indices;

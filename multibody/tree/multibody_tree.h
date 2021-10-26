@@ -755,6 +755,9 @@ class MultibodyTree {
   // the model.
   // @{
 
+  // See MultibodyPlant method.
+  int NumBodiesWithName(std::string_view name) const;
+
   // @returns `true` if a body named `name` was added to the model.
   // @see AddRigidBody().
   //
@@ -807,6 +810,10 @@ class MultibodyTree {
 
   // Returns a list of joint indices associated with `model_instance`.
   std::vector<JointIndex> GetJointIndices(ModelInstanceIndex model_instance)
+  const;
+
+  // Returns a list of frame indices associated with `model_instance`
+  std::vector<FrameIndex> GetFrameIndices(ModelInstanceIndex model_instance)
   const;
 
   // See MultibodyPlant method.

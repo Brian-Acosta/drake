@@ -220,6 +220,9 @@ GTEST_TEST(MultibodyPlant, SimpleModelCreation) {
   EXPECT_TRUE(plant->HasBodyNamed(parameters.link1_name()));
   EXPECT_TRUE(plant->HasBodyNamed(parameters.link2_name()));
   EXPECT_FALSE(plant->HasBodyNamed(kInvalidName));
+  // Indicator that the plant is calling the tree's method correctly.
+  EXPECT_EQ(plant->NumBodiesWithName(parameters.link1_name()), 1);
+  EXPECT_EQ(plant->NumBodiesWithName(kInvalidName), 0);
 
   EXPECT_TRUE(plant->HasJointNamed(parameters.shoulder_joint_name()));
   EXPECT_TRUE(plant->HasJointNamed(parameters.elbow_joint_name()));
@@ -275,6 +278,9 @@ GTEST_TEST(MultibodyPlant, SimpleModelCreation) {
   const Joint<double>& pin_joint =
       plant->GetJointByName("pin");
   EXPECT_EQ(pin_joint.model_instance(), pendulum_model_instance);
+  const Joint<double>& weld_joint =
+      plant->GetJointByName("weld");
+  EXPECT_EQ(weld_joint.model_instance(), pendulum_model_instance);
   EXPECT_THROW(plant->GetJointByName(kInvalidName), std::logic_error);
 
   // Get force elements by index. In this case the default gravity field.
@@ -301,6 +307,7 @@ GTEST_TEST(MultibodyPlant, SimpleModelCreation) {
       plant->GetJointIndices(pendulum_model_instance);
   EXPECT_EQ(pendulum_joint_indices.size(), 2);  // pin joint + weld joint.
   EXPECT_EQ(pendulum_joint_indices[0], pin_joint.index());
+  EXPECT_EQ(pendulum_joint_indices[1], weld_joint.index());
 
   // Templatized version to obtain retrieve a particular known type of joint.
   const RevoluteJoint<double>& shoulder =
@@ -348,6 +355,26 @@ GTEST_TEST(MultibodyPlant, SimpleModelCreation) {
       "calls to this method must happen before Finalize\\(\\).");
   // TODO(amcastro-tri): add test to verify that requesting a joint of the wrong
   // type throws an exception. We need another joint type to do so.
+
+  // Get frame indices by model_instance
+  const std::vector<FrameIndex> acrobot_frame_indices =
+      plant->GetFrameIndices(default_model_instance());
+  ASSERT_EQ(acrobot_frame_indices.size(), 3);
+  EXPECT_EQ(acrobot_frame_indices[0], link1.body_frame().index());
+  EXPECT_EQ(acrobot_frame_indices[1], link2.body_frame().index());
+  EXPECT_EQ(acrobot_frame_indices[2], elbow_joint.frame_on_parent().index());
+
+  const Frame<double>& model_frame = plant->GetFrameByName("__model__");
+  EXPECT_EQ(model_frame.model_instance(), pendulum_model_instance);
+  const std::vector<FrameIndex> pendulum_frame_indices =
+      plant->GetFrameIndices(pendulum_model_instance);
+  ASSERT_EQ(pendulum_frame_indices.size(), 6);
+  EXPECT_EQ(pendulum_frame_indices[0], upper.body_frame().index());
+  EXPECT_EQ(pendulum_frame_indices[1], lower.body_frame().index());
+  EXPECT_EQ(pendulum_frame_indices[2], model_frame.index());
+  EXPECT_EQ(pendulum_frame_indices[3], pin_joint.frame_on_child().index());
+  EXPECT_EQ(pendulum_frame_indices[4], weld_joint.frame_on_parent().index());
+  EXPECT_EQ(pendulum_frame_indices[5], weld_joint.frame_on_child().index());
 }
 
 GTEST_TEST(MultibodyPlantTest, AddMultibodyPlantSceneGraph) {
@@ -2309,7 +2336,7 @@ class MultibodyPlantContactJacobianTests : public ::testing::Test {
         context_->get_continuous_state().get_generalized_velocity().
             CopyToVector();
     VectorX<AutoDiffXd> v_autodiff(plant_.num_velocities());
-    math::initializeAutoDiff(v, v_autodiff);
+    math::InitializeAutoDiff(v, &v_autodiff);
     context_autodiff->get_mutable_continuous_state().
         get_mutable_generalized_velocity().SetFromVector(v_autodiff);
 
@@ -2480,8 +2507,7 @@ TEST_F(MultibodyPlantContactJacobianTests, NormalAndTangentJacobian) {
   // separation velocities Jacobian N.
   VectorX<AutoDiffXd> vn_autodiff = CalcNormalVelocities(
       *plant_autodiff, *context_autodiff, penetrations_);
-  const MatrixX<double> vn_derivs =
-      math::autoDiffToGradientMatrix(vn_autodiff);
+  const MatrixX<double> vn_derivs = math::ExtractGradient(vn_autodiff);
 
   // Verify the result.
   EXPECT_TRUE(CompareMatrices(
@@ -2491,8 +2517,7 @@ TEST_F(MultibodyPlantContactJacobianTests, NormalAndTangentJacobian) {
   // velocities Jacobian Jt.
   VectorX<AutoDiffXd> vt_autodiff = CalcTangentVelocities(
       *plant_autodiff, *context_autodiff, penetrations_, R_WC_set);
-  const MatrixX<double> vt_derivs =
-      math::autoDiffToGradientMatrix(vt_autodiff);
+  const MatrixX<double> vt_derivs = math::ExtractGradient(vt_autodiff);
 
   // Verify the result.
   EXPECT_TRUE(CompareMatrices(
@@ -2704,6 +2729,17 @@ TEST_P(KukaArmTest, StateAccess) {
   EXPECT_EQ(xc, VectorX<double>::Zero(plant_->num_multibody_states()));
   plant_->SetPositionsAndVelocities(context_.get(), xc_expected);
   EXPECT_EQ(xc, xc_expected);
+
+  // Ensure that call sites accepting a VectorBlock do not allocate.
+  auto q_block = xc_expected.head(plant_->num_positions());
+  auto v_block = xc_expected.tail(plant_->num_velocities());
+  auto qv_block = xc_expected.head(plant_->num_multibody_states());
+  {
+    drake::test::LimitMalloc guard({.max_num_allocations = 0});
+    plant_->SetPositions(context_.get(), q_block);
+    plant_->SetVelocities(context_.get(), v_block);
+    plant_->SetPositionsAndVelocities(context_.get(), qv_block);
+  }
 }
 
 TEST_P(KukaArmTest, InstanceStateAccess) {
@@ -2772,6 +2808,21 @@ TEST_P(KukaArmTest, InstanceStateAccess) {
   plant_->SetPositionsAndVelocities(context_.get(), arm2, x);
   EXPECT_EQ(plant_->GetPositionsAndVelocities(*context_, arm2), x);
   EXPECT_EQ(plant_->GetPositionsAndVelocities(*context_, arm1).norm(), 0);
+
+  // Ensure that call sites accepting a VectorBlock do not allocate.
+  auto q_block = q.head(plant_->num_positions(arm2));
+  auto v_block = qd.head(plant_->num_velocities(arm2));
+  auto qv_block = x.head(q.size() + qd.size());
+  {
+    drake::test::LimitMalloc guard({.max_num_allocations = 0});
+    plant_->SetPositions(context_.get(), arm2, q_block);
+    plant_->SetPositions(*context_, &context_->get_mutable_state(),
+                         arm2, q_block);
+    plant_->SetVelocities(context_.get(), arm2, v_block);
+    plant_->SetVelocities(*context_, &context_->get_mutable_state(),
+                          arm2, v_block);
+    plant_->SetPositionsAndVelocities(context_.get(), arm2, qv_block);
+  }
 }
 
 // Verifies we instantiated an appropriate MultibodyPlant model based on the
@@ -3427,7 +3478,7 @@ GTEST_TEST(MultibodyPlantTest, AutoDiffAcrobotParameters) {
   Matrix2<AutoDiffXd> mass_matrix;
   plant_autodiff->CalcMassMatrix(*context_autodiff, &mass_matrix);
 
-  const auto& mass_matrix_grad = math::autoDiffToGradientMatrix(mass_matrix);
+  const auto& mass_matrix_grad = math::ExtractGradient(mass_matrix);
 
   // Verify numerical derivative matches analytic solution.
   // In the starting configuration q = (0, 0).

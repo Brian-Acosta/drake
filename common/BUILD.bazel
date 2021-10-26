@@ -274,6 +274,7 @@ drake_cc_library(
 
 drake_cc_library(
     name = "identifier",
+    srcs = ["identifier.cc"],
     hdrs = ["identifier.h"],
     deps = [
         ":essential",
@@ -820,6 +821,7 @@ drake_cc_googletest(
 
 drake_cc_googletest(
     name = "eigen_stl_types_test",
+    copts = ["-Wno-cpp"],
     deps = [
         ":essential",
     ],

@@ -5,7 +5,7 @@
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
 #include "drake/common/test_utilities/expect_throws_message.h"
 #include "drake/math/autodiff_gradient.h"
-#include "drake/multibody/fixed_fem/dev/constitutive_model.h"
+#include "drake/multibody/fem/constitutive_model.h"
 #include "drake/multibody/fixed_fem/dev/corotated_model.h"
 #include "drake/multibody/fixed_fem/dev/linear_constitutive_model.h"
 #include "drake/multibody/fixed_fem/dev/test/test_utilities.h"
@@ -34,10 +34,10 @@ std::array<Matrix3<AutoDiffXd>, num_locations> MakeDeformationGradients() {
   const Eigen::Matrix<double, 9, Eigen::Dynamic> derivatives(
       Eigen::Matrix<double, 9, 9>::Identity());
   for (int i = 0; i < num_locations; ++i) {
-    const auto F_autodiff_flat = math::initializeAutoDiffGivenGradientMatrix(
-        Eigen::Map<const Eigen::Matrix<double, 9, 1>>(
-            deformation_gradients[i].data(), 9),
-        derivatives);
+    const auto F_autodiff_flat =
+        math::InitializeAutoDiff(Eigen::Map<const Eigen::Matrix<double, 9, 1>>(
+                                     deformation_gradients[i].data(), 9),
+                                 derivatives);
     deformation_gradients_autodiff[i] =
         Eigen::Map<const Matrix3<AutoDiffXd>>(F_autodiff_flat.data(), 3, 3);
   }
@@ -160,7 +160,7 @@ void TestdPdFIsDerivativeOfP() {
         EXPECT_TRUE(CompareMatrices(
             Eigen::Map<const Matrix3d>(P[q](i, j).derivatives().data(), 3, 3),
             dPijdF,
-            fem::test::CalcConditionNumber<double>(dPijdF) * kTolerance));
+            fem::test::CalcConditionNumber<AutoDiffXd>(P[q]) * kTolerance));
       }
     }
   }

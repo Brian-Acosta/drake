@@ -867,12 +867,14 @@ class BodyNode : public MultibodyElement<BodyNode, T, BodyNodeIndex> {
     DRAKE_DEMAND(static_cast<int>(H_array.size()) ==
         this->get_parent_tree().num_velocities());
     const int start_index_in_v = get_topology().mobilizer_velocities_start_in_v;
-    DRAKE_DEMAND(start_index_in_v < this->get_parent_tree().num_velocities());
     const int num_velocities = get_topology().num_mobilizer_velocities;
+    DRAKE_DEMAND(num_velocities == 0 ||
+                 start_index_in_v < this->get_parent_tree().num_velocities());
     // The first column of this node's hinge matrix H_PB_W:
-    const Vector6<T>& H_col0 = H_array[start_index_in_v];
+    const T* H_col0 =
+        num_velocities == 0 ? nullptr : H_array[start_index_in_v].data();
     // Create an Eigen map to the full H_PB_W for this node:
-    return Eigen::Map<const MatrixUpTo6<T>>(H_col0.data(), 6, num_velocities);
+    return Eigen::Map<const MatrixUpTo6<T>>(H_col0, 6, num_velocities);
   }
 
   // Mutable version of GetJacobianFromArray().
@@ -881,12 +883,14 @@ class BodyNode : public MultibodyElement<BodyNode, T, BodyNodeIndex> {
     DRAKE_DEMAND(static_cast<int>(H_array->size()) ==
                  this->get_parent_tree().num_velocities());
     const int start_index_in_v = get_topology().mobilizer_velocities_start_in_v;
-    DRAKE_DEMAND(start_index_in_v < this->get_parent_tree().num_velocities());
     const int num_velocities = get_topology().num_mobilizer_velocities;
+    DRAKE_DEMAND(num_velocities == 0 ||
+                 start_index_in_v < this->get_parent_tree().num_velocities());
     // The first column of this node's hinge matrix H_PB_W:
-    Vector6<T>& H_col0 = (*H_array)[start_index_in_v];
+    T* H_col0 =
+        num_velocities == 0 ? nullptr : (*H_array)[start_index_in_v].data();
     // Create an Eigen map to the full H_PB_W for this node:
-    return Eigen::Map<MatrixUpTo6<T>>(H_col0.data(), 6, num_velocities);
+    return Eigen::Map<MatrixUpTo6<T>>(H_col0, 6, num_velocities);
   }
 
   // This method is used by MultibodyTree within a tip-to-base loop to compute
@@ -930,7 +934,8 @@ class BodyNode : public MultibodyElement<BodyNode, T, BodyNodeIndex> {
       ArticulatedBodyInertiaCache<T>* abic) const {
     DRAKE_THROW_UNLESS(topology_.body != world_index());
     DRAKE_THROW_UNLESS(abic != nullptr);
-    DRAKE_THROW_UNLESS(this->velocity_start() < reflected_inertia.size());
+    DRAKE_THROW_UNLESS(reflected_inertia.size() ==
+                       this->get_parent_tree().num_velocities());
 
     // As a guideline for developers, a summary of the computations performed in
     // this method is provided:
@@ -1054,15 +1059,17 @@ class BodyNode : public MultibodyElement<BodyNode, T, BodyNodeIndex> {
 
       // Compute the LDLT factorization of D_B as ldlt_D_B.
       // TODO(bobbyluig): Test performance against inverse().
-      Eigen::LDLT<MatrixUpTo6<T>>& ldlt_D_B = get_mutable_ldlt_D_B(abic);
-      ldlt_D_B = D_B.template selfadjointView<Eigen::Lower>().ldlt();
+      math::LinearSolver<Eigen::LDLT, MatrixUpTo6<T>>& ldlt_D_B =
+          get_mutable_ldlt_D_B(abic);
+      ldlt_D_B = math::LinearSolver<Eigen::LDLT, MatrixUpTo6<T>>(
+          MatrixUpTo6<T>(D_B.template selfadjointView<Eigen::Lower>()));
 
       // Ensure that D_B is not singular.
       // Singularity means that a non-physical hinge mapping matrix was used or
       // that this articulated body inertia has some non-physical quantities
       // (such as zero moment of inertia along an axis which the hinge mapping
       // matrix permits motion).
-      if (ldlt_D_B.info() != Eigen::Success) {
+      if (ldlt_D_B.eigen_linear_solver().info() != Eigen::Success) {
         std::stringstream message;
         message << "Encountered singular articulated body hinge inertia "
                 << "for body node index " << topology_.index << ". "
@@ -1073,7 +1080,7 @@ class BodyNode : public MultibodyElement<BodyNode, T, BodyNodeIndex> {
 
       // Compute the Kalman gain, g_PB_W, using (6).
       Matrix6xUpTo6<T>& g_PB_W = get_mutable_g_PB_W(abic);
-      g_PB_W = ldlt_D_B.solve(U_B_W).transpose();
+      g_PB_W = ldlt_D_B.Solve(U_B_W).transpose();
 
       // Project P_B_W using (7) to obtain Pplus_PB_W, the articulated body
       // inertia of this body B as felt by body P and expressed in frame W.
@@ -1259,7 +1266,7 @@ class BodyNode : public MultibodyElement<BodyNode, T, BodyNodeIndex> {
       // Compute nu_B, the articulated body inertia innovations generalized
       // acceleration.
       const VectorUpTo6<T> nu_B =
-          get_ldlt_D_B(abic).solve(get_e_B(aba_force_cache));
+          get_ldlt_D_B(abic).Solve(get_e_B(aba_force_cache));
 
       // Mutable reference to the generalized acceleration.
       auto vmdot = get_mutable_accelerations(ac);
@@ -1635,13 +1642,13 @@ class BodyNode : public MultibodyElement<BodyNode, T, BodyNodeIndex> {
 
   // Returns a const reference to the LDLT factorization `ldlt_D_B` of the
   // articulated body hinge inertia.
-  const Eigen::LDLT<MatrixUpTo6<T>>& get_ldlt_D_B(
+  const math::LinearSolver<Eigen::LDLT, MatrixUpTo6<T>>& get_ldlt_D_B(
       const ArticulatedBodyInertiaCache<T>& abic) const {
     return abic.get_ldlt_D_B(topology_.index);
   }
 
   // Mutable version of get_ldlt_D_B().
-  Eigen::LDLT<MatrixUpTo6<T>>& get_mutable_ldlt_D_B(
+  math::LinearSolver<Eigen::LDLT, MatrixUpTo6<T>>& get_mutable_ldlt_D_B(
       ArticulatedBodyInertiaCache<T>* abic) const {
     return abic->get_mutable_ldlt_D_B(topology_.index);
   }

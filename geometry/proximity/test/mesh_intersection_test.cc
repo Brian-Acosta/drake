@@ -448,7 +448,7 @@ unique_ptr<VolumeMeshFieldLinear<T, T>> TrivialVolumeMeshField(
   std::vector<T> p_values = {p0, p1, p2, p3, p4};
   DRAKE_DEMAND(5 == volume_mesh->num_vertices());
   auto volume_mesh_field = std::make_unique<VolumeMeshFieldLinear<T, T>>(
-      "pressure", std::move(p_values), volume_mesh);
+      std::move(p_values), volume_mesh);
 
   return volume_mesh_field;
 }
@@ -1094,7 +1094,7 @@ class MeshMeshDerivativesTest : public ::testing::Test {
     tet_mesh_S_ = make_unique<VolumeMesh<double>>(std::move(elements),
                                               std::move(vertices_S));
     field_S_ = make_unique<VolumeMeshFieldLinear<double, double>>(
-        "pressure", vector<double>{0.25, 0.5, 0.75, 1}, tet_mesh_S_.get());
+        vector<double>{0.25, 0.5, 0.75, 1}, tet_mesh_S_.get());
     bvh_S_ = std::make_unique<Bvh<Obb, VolumeMesh<double>>>(*tet_mesh_S_);
 
     /* Rigid triangle mesh; tilt and offset the triangle's plane so things are
@@ -1232,7 +1232,7 @@ class MeshMeshDerivativesTest : public ::testing::Test {
     for (const auto& config : configurations) {
       const RotationMatrixd R_WS_d = X_WR_d.rotation() * config.R_RS_d;
       const Vector3d p_WS_d = X_WR_d * config.p_RS_d;
-      const Vector3<AutoDiffXd> p_WS = math::initializeAutoDiff(p_WS_d);
+      const Vector3<AutoDiffXd> p_WS = math::InitializeAutoDiff(p_WS_d);
       const RigidTransform<AutoDiffXd> X_WS(R_WS_d.cast<AutoDiffXd>(), p_WS);
 
       auto surface = ComputeContactSurfaceFromSoftVolumeRigidSurface(
@@ -1260,7 +1260,7 @@ class MeshMeshDerivativesTest : public ::testing::Test {
     const vector<VolumeVertex<double>>& verts_S = field_S_->mesh().vertices();
     const vector<pair<int, int>> edges{{0, 1}, {0, 2}, {0, 3},
                                        {1, 2}, {1, 3}, {2, 3}};
-    for (const auto [a, b] : edges) {
+    for (const auto& [a, b] : edges) {
       const Vector3d& p_AB_S = verts_S[b].r_MV() - verts_S[a].r_MV();
       const Vector3d p_AE_S = p_SE - verts_S[a].r_MV();
       const double lhs = std::pow(p_AB_S.dot(p_AE_S), 2);
@@ -1371,9 +1371,9 @@ TEST_F(MeshMeshDerivativesTest, Area) {
       const Vector3d p_WA = convert_to_double(p_WA_ad);
       const Vector3d p_WB = convert_to_double(p_WB_ad);
       const Vector3d p_WC = convert_to_double(p_WC_ad);
-      const Matrix3<double> dA_dSo = math::autoDiffToGradientMatrix(p_WA_ad);
-      const Matrix3<double> dB_dSo = math::autoDiffToGradientMatrix(p_WB_ad);
-      const Matrix3<double> dC_dSo = math::autoDiffToGradientMatrix(p_WC_ad);
+      const Matrix3<double> dA_dSo = math::ExtractGradient(p_WA_ad);
+      const Matrix3<double> dB_dSo = math::ExtractGradient(p_WB_ad);
+      const Matrix3<double> dC_dSo = math::ExtractGradient(p_WC_ad);
 
       const Vector3d p_AB_W = p_WB - p_WA;
       const Vector3d p_AC_W = p_WC - p_WA;
@@ -1499,7 +1499,7 @@ TEST_F(MeshMeshDerivativesTest, VertexPosition) {
       // clang-format on
       const Matrix3<double> expected_J_W =
           R_WR * (expected_J_R * R_RW.matrix());
-      const Matrix3<double> J_W = math::autoDiffToGradientMatrix(p_WV_ad);
+      const Matrix3<double> J_W = math::ExtractGradient(p_WV_ad);
       ASSERT_TRUE(CompareMatrices(J_W, expected_J_W, kEps));
     }
 
@@ -1510,12 +1510,11 @@ TEST_F(MeshMeshDerivativesTest, VertexPosition) {
         /* The derivative should simply be the mean of the first three. */
         Matrix3<double> expected_J_W = Matrix3<double>::Zero();
         for (VIndex v(0); v < 3; ++v) {
-          expected_J_W +=
-              math::autoDiffToGradientMatrix(mesh_W.vertex(v).r_MV());
+          expected_J_W += math::ExtractGradient(mesh_W.vertex(v).r_MV());
         }
         expected_J_W /= 3;
         const Vector3<AutoDiffXd>& p_WC = mesh_W.vertex(VIndex(3)).r_MV();
-        const Matrix3<double> J_W = math::autoDiffToGradientMatrix(p_WC);
+        const Matrix3<double> J_W = math::ExtractGradient(p_WC);
         EXPECT_TRUE(CompareMatrices(J_W, expected_J_W, kEps));
         break;
       }
@@ -1539,10 +1538,10 @@ TEST_F(MeshMeshDerivativesTest, FaceNormalsWrtPosition) {
     const Matrix3<double> zeros = Matrix3<double>::Zero();
     for (SurfaceFaceIndex f(0); f < mesh_W.num_elements(); ++f) {
       const Vector3<AutoDiffXd>& tri_n_W = mesh_W.face_normal(f);
-      EXPECT_TRUE(CompareMatrices(math::autoDiffToValueMatrix(tri_n_W),
-                                  plane_n_W, 2 * kEps));
-      EXPECT_TRUE(CompareMatrices(math::autoDiffToGradientMatrix(tri_n_W),
-                                  zeros, 10 * kEps));
+      EXPECT_TRUE(
+          CompareMatrices(math::ExtractValue(tri_n_W), plane_n_W, 2 * kEps));
+      EXPECT_TRUE(
+          CompareMatrices(math::ExtractGradient(tri_n_W), zeros, 10 * kEps));
     }
   };
 
@@ -1570,7 +1569,7 @@ TEST_F(MeshMeshDerivativesTest, FaceNormalsWrtOrientation) {
   const Vector3<AutoDiffXd> p_WN =
       this->X_WR_ * Vector3<AutoDiffXd>{0.25, -0.3, 0};
   const Vector3<AutoDiffXd> plane_n_W_ad = this->X_WR_.rotation().col(2);
-  const Vector3d plane_n_W = math::autoDiffToValueMatrix(plane_n_W_ad);
+  const Vector3d plane_n_W = math::ExtractValue(plane_n_W_ad);
   const Vector3<AutoDiffXd> p_WS = p_WN - this->kDepth * plane_n_W_ad;
   for (const double theta : {0.0, M_PI / 6, M_PI / 2 * 0.9, M_PI / 2 * 0.99}) {
     AutoDiffXd theta_ad = theta;
@@ -1594,10 +1593,10 @@ TEST_F(MeshMeshDerivativesTest, FaceNormalsWrtOrientation) {
     for (SurfaceFaceIndex f(0); f < mesh_W.num_elements(); ++f) {
       const Vector3<AutoDiffXd>& tri_n_W = mesh_W.face_normal(f);
       /* Confirm the normal direction. */
-      EXPECT_TRUE(CompareMatrices(math::autoDiffToValueMatrix(tri_n_W),
-                                  plane_n_W, 5 * kEps));
+      EXPECT_TRUE(
+          CompareMatrices(math::ExtractValue(tri_n_W), plane_n_W, 5 * kEps));
       /* Confirm the normal gradient w.r.t. theta. */
-      EXPECT_TRUE(CompareMatrices(math::autoDiffToGradientMatrix(tri_n_W),
+      EXPECT_TRUE(CompareMatrices(math::ExtractGradient(tri_n_W),
                                   Vector3d::Zero(), 10 * kEps));
     }
   }
@@ -1642,7 +1641,7 @@ TEST_F(MeshMeshDerivativesTest, Pressure) {
     const Vector3d grad_p_W = X_WS_d.rotation() * grad_p_S;
     for (SurfaceVertexIndex v(0); v < surface.mesh_W().num_vertices(); ++v) {
       const Matrix3<double> dp_WQ_dp_WSo_W =
-          math::autoDiffToGradientMatrix(surface.mesh_W().vertex(v).r_MV());
+          math::ExtractGradient(surface.mesh_W().vertex(v).r_MV());
       const Vector3d dp_dp_WSo_W_expected =
           grad_p_W.transpose() * (dp_WQ_dp_WSo_W - Matrix3<double>::Identity());
       const AutoDiffXd& p = surface.e_MN().EvaluateAtVertex(v);

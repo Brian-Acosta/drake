@@ -2,9 +2,8 @@
 
 #include "drake/common/test_utilities/expect_throws_message.h"
 #include "drake/multibody/fem/deformation_gradient_data.h"
-#include "drake/multibody/fixed_fem/dev/constitutive_model.h"
+#include "drake/multibody/fem/constitutive_model.h"
 
-// TODO(xuchenhan-tri): Rename this file to constitutive_model_test.cc.
 namespace drake {
 namespace multibody {
 namespace fem {

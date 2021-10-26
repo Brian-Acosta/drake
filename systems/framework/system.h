@@ -18,7 +18,6 @@
 #include "drake/common/drake_assert.h"
 #include "drake/common/drake_bool.h"
 #include "drake/common/drake_copyable.h"
-#include "drake/common/drake_deprecated.h"
 #include "drake/common/drake_throw.h"
 #include "drake/common/nice_type_name.h"
 #include "drake/common/pointer_cast.h"
@@ -1397,20 +1396,6 @@ class System : public SystemBase {
 
   //@}
 
-  // =========================================================================
-  /** @name                Deprecated declarations
-  Methods in this section leave out the port name parameter and are the same
-  as invoking the corresponding method with `kUseDefaultName` as the name.
-  We intend to make specifying the name required and will deprecate these
-  soon. Don't use them. */
-  //@{
-
-  DRAKE_DEPRECATED("2021-10-01", "Pass a port name as the first argument.")
-  InputPort<T>& DeclareInputPort(
-      PortDataType type, int size,
-      std::optional<RandomDistribution> random_type = std::nullopt);
-  //@}
-
   /** Adds an already-created constraint to the list of constraints for this
   System.  Ownership of the SystemConstraint is transferred to this system. */
   SystemConstraintIndex AddConstraint(
@@ -1691,13 +1676,6 @@ class System : public SystemBase {
   /** Returns the SystemScalarConverter for `this` system. */
   SystemScalarConverter& get_mutable_system_scalar_converter() {
     return system_scalar_converter_;
-  }
-
-  template <template <typename> class Clazz>
-  DRAKE_DEPRECATED("2021-09-01",
-                   "Please use ValidateCreatedForThisSystem instead.")
-  void ValidateChildOfContext(const Clazz<T>* object) const {
-    ValidateCreatedForThisSystem(object);
   }
 
  private:
