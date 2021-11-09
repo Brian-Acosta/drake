@@ -97,10 +97,10 @@ cc_binary(
     includes = LCM_PUBLIC_HEADER_INCLUDES,
     linkopts = select({
         ":linux": [
-            "-pthread",  # For lcm_(mp)udpm.c.
+            "-lpthread",  # For lcm_(mp)udpm.c.
             "-Wl,-soname,libdrake_lcm.so",
         ],
-        "@//conditions:default": [],
+        "@//conditions:default": ["-pthread"],
     }),
     linkshared = 1,
     visibility = ["@drake_visualizer//:__pkg__"],

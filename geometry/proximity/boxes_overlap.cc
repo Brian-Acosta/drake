@@ -7,6 +7,7 @@ namespace internal {
 using Eigen::Matrix3d;
 using Eigen::Vector3d;
 using math::RigidTransformd;
+using std::abs;
 
 // TODO(SeanCurtis-TRI) This code is tested in obb_test.cc for historical
 //  reasons. If that causes confusion/difficulty, move it into its own unit test
