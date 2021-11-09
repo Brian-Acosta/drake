@@ -54,14 +54,6 @@ class TestGeometryCore(unittest.TestCase):
         self.assertTrue(dut.IsActive(filter_id=id))
         self.assertTrue(dut.RemoveDeclaration(filter_id=id))
 
-        # TODO(2021-11-01) Remove these with deprecation resolution.
-        # Legacy API
-        with catch_drake_warnings(expected_count=4):
-            sg.ExcludeCollisionsBetween(geometries, geometries)
-            sg.ExcludeCollisionsBetween(sg_context, geometries, geometries)
-            sg.ExcludeCollisionsWithin(geometries)
-            sg.ExcludeCollisionsWithin(sg_context, geometries)
-
     def test_geometry_frame_api(self):
         frame = mut.GeometryFrame(frame_name="test_frame")
         self.assertIsInstance(frame.id(), mut.FrameId)
@@ -239,13 +231,10 @@ class TestGeometryCore(unittest.TestCase):
         """
         props = mut.ProximityProperties()
         reference_friction = CoulombFriction(0.25, 0.125)
-        mut.AddContactMaterial(elastic_modulus=1.5,
-                               dissipation=2.7,
+        mut.AddContactMaterial(dissipation=2.7,
                                point_stiffness=3.9,
                                friction=reference_friction,
                                properties=props)
-        self.assertTrue(props.HasProperty("material", "elastic_modulus"))
-        self.assertEqual(props.GetProperty("material", "elastic_modulus"), 1.5)
         self.assertTrue(
             props.HasProperty("material", "hunt_crossley_dissipation"))
         self.assertEqual(
@@ -263,6 +252,7 @@ class TestGeometryCore(unittest.TestCase):
 
         props = mut.ProximityProperties()
         res_hint = 0.175
+        E = 1e8
         mut.AddRigidHydroelasticProperties(
             resolution_hint=res_hint, properties=props)
         self.assertTrue(props.HasProperty("hydroelastic", "compliance_type"))
@@ -280,28 +270,31 @@ class TestGeometryCore(unittest.TestCase):
         props = mut.ProximityProperties()
         res_hint = 0.275
         mut.AddSoftHydroelasticProperties(
-            resolution_hint=res_hint, properties=props)
+            resolution_hint=res_hint, hydroelastic_modulus=E, properties=props)
         self.assertTrue(props.HasProperty("hydroelastic", "compliance_type"))
         self.assertTrue(mut_testing.PropertiesIndicateSoftHydro(props))
         self.assertTrue(props.HasProperty("hydroelastic", "resolution_hint"))
         self.assertEqual(props.GetProperty("hydroelastic", "resolution_hint"),
                          res_hint)
-
-        props = mut.ProximityProperties()
-        mut.AddSoftHydroelasticProperties(properties=props)
-        self.assertTrue(props.HasProperty("hydroelastic", "compliance_type"))
-        self.assertTrue(mut_testing.PropertiesIndicateSoftHydro(props))
-        self.assertFalse(props.HasProperty("hydroelastic", "resolution_hint"))
+        self.assertTrue(props.HasProperty("hydroelastic",
+                                          "hydroelastic_modulus"))
+        self.assertEqual(props.GetProperty("hydroelastic",
+                                           "hydroelastic_modulus"), E)
 
         props = mut.ProximityProperties()
         slab_thickness = 0.275
         mut.AddSoftHydroelasticPropertiesForHalfSpace(
-            slab_thickness=slab_thickness, properties=props)
+            slab_thickness=slab_thickness, hydroelastic_modulus=E,
+            properties=props)
         self.assertTrue(props.HasProperty("hydroelastic", "compliance_type"))
         self.assertTrue(mut_testing.PropertiesIndicateSoftHydro(props))
         self.assertTrue(props.HasProperty("hydroelastic", "slab_thickness"))
         self.assertEqual(props.GetProperty("hydroelastic", "slab_thickness"),
                          slab_thickness)
+        self.assertTrue(props.HasProperty("hydroelastic",
+                                          "hydroelastic_modulus"))
+        self.assertEqual(props.GetProperty("hydroelastic",
+                                           "hydroelastic_modulus"), E)
 
     def test_rgba_api(self):
         r, g, b, a = 0.75, 0.5, 0.25, 1.
@@ -329,7 +322,8 @@ class TestGeometryCore(unittest.TestCase):
             mut.Ellipsoid(a=1.0, b=2.0, c=3.0),
             mut.HalfSpace(),
             mut.Mesh(absolute_filename="arbitrary/path", scale=1.0),
-            mut.Convex(absolute_filename="arbitrary/path", scale=1.0)
+            mut.Convex(absolute_filename="arbitrary/path", scale=1.0),
+            mut.MeshcatCone(height=1.23, a=3.45, b=6.78)
         ]
         for shape in shapes:
             self.assertIsInstance(shape, mut.Shape)
@@ -404,3 +398,11 @@ class TestGeometryCore(unittest.TestCase):
         assert_shape_api(sphere)
         self.assertEqual(sphere.radius(), 1.0)
         assert_pickle(self, sphere, mut.Sphere.radius)
+
+        cone = mut.MeshcatCone(height=1.2, a=3.4, b=5.6)
+        assert_shape_api(cone)
+        self.assertEqual(cone.height(), 1.2)
+        self.assertEqual(cone.a(), 3.4)
+        self.assertEqual(cone.b(), 5.6)
+        assert_pickle(self, cone, lambda shape: [
+                      shape.height(), shape.a(), shape.b()])

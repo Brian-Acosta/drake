@@ -146,7 +146,6 @@ drake_cc_library(
     hdrs = ["extract_double.h"],
     deps = [
         ":essential",
-        ":nice_type_name",
     ],
 )
 
@@ -315,6 +314,10 @@ drake_cc_binary(
         "drake_marker.cc",
         "drake_marker.h",
     ],
+    linkopts = select({
+        "//tools/cc_toolchain:linux": ["-Wl,-soname,libdrake_marker.so"],
+        "//conditions:default": [],
+    }),
     linkshared = 1,
     linkstatic = 1,
     visibility = ["//visibility:private"],
@@ -777,6 +780,13 @@ sh_test(
 alias(
     name = "print_host_settings",
     actual = "//tools/cc_toolchain:print_host_settings",
+)
+
+drake_cc_googletest(
+    name = "drake_copyable_test",
+    deps = [
+        ":essential",
+    ],
 )
 
 drake_cc_googletest(

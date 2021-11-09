@@ -340,8 +340,7 @@ doc:
     bar: 2.0
 )""")),
       "YAML node of type Mapping \\(with size 1 and keys \\{value\\}\\)"
-      " has invalid merge key type \\(Scalar\\) within entry"
-      " for std::map<[^ ]*> value\\.");
+      " has invalid merge key type \\(Scalar\\)\\.");
 
   DRAKE_EXPECT_THROWS_MESSAGE(
       AcceptIntoDummy<MapStruct>(Load(R"""(
@@ -353,8 +352,48 @@ doc:
     bar: 2.0
 )""")),
       "YAML node of type Mapping \\(with size 1 and keys \\{value\\}\\)"
-      " has invalid merge key type \\(Null\\) within entry"
-      " for std::map<[^ ]*> value\\.");
+      " has invalid merge key type \\(Null\\).");
+}
+
+TEST_P(YamlReadArchiveTest, StdMapDirectly) {
+  const std::string doc = R"""(
+doc:
+  key_1:
+    value: 1.0
+  key_2:
+    value: 2.0
+)""";
+  const auto& x = AcceptNoThrow<std::map<std::string, DoubleStruct>>(Load(doc));
+  EXPECT_EQ(x.size(), 2);
+  EXPECT_EQ(x.at("key_1").value, 1.0);
+  EXPECT_EQ(x.at("key_2").value, 2.0);
+}
+
+TEST_P(YamlReadArchiveTest, StdMapDirectlyWithDefaults) {
+  const std::string doc = R"""(
+doc:
+  key_1:
+    value: 1.0
+  key_with_defaulted_value: {}
+)""";
+  const auto node = Load(doc);
+  if (GetParam().allow_cpp_with_no_yaml) {
+    std::map<std::string, DoubleStruct> result;
+    result.emplace("pre_existing_default", DoubleStruct{.value = 0.0});
+    YamlReadArchive(node, GetParam()).Accept(&result);
+    if (GetParam().retain_map_defaults) {
+      EXPECT_EQ(result.size(), 3);
+      EXPECT_EQ(result.at("pre_existing_default").value, 0.0);
+    } else {
+      EXPECT_EQ(result.size(), 2);
+    }
+    EXPECT_EQ(result.at("key_1").value, 1.0);
+    EXPECT_EQ(result.at("key_with_defaulted_value").value, kNominalDouble);
+  } else {
+    DRAKE_EXPECT_THROWS_MESSAGE(
+        (AcceptIntoDummy<std::map<std::string, DoubleStruct>>(node)),
+        ".*missing entry for double value.*");
+  }
 }
 
 TEST_P(YamlReadArchiveTest, Optional) {
@@ -639,8 +678,7 @@ doc:
 )""")),
       "YAML node of type Mapping"
       " \\(with size 2 and keys \\{inner_struct, outer_value\\}\\)"
-      " has invalid merge key type \\(Scalar\\) within entry"
-      " for .*::OuterStruct::InnerStruct inner_struct\\.");
+      " has invalid merge key type \\(Scalar\\)\\.");
 
   DRAKE_EXPECT_THROWS_MESSAGE(
       AcceptIntoDummy<OuterStruct>(Load(R"""(
@@ -653,8 +691,7 @@ doc:
 )""")),
       "YAML node of type Mapping"
       " \\(with size 2 and keys \\{inner_struct, outer_value\\}\\)"
-      " has invalid merge key type \\(Null\\) within entry"
-      " for .*::OuterStruct::InnerStruct inner_struct\\.");
+      " has invalid merge key type \\(Null\\)\\.");
 
   DRAKE_EXPECT_THROWS_MESSAGE(
       AcceptIntoDummy<OuterStruct>(Load(R"""(
@@ -667,8 +704,7 @@ doc:
   outer_value: 1.0
 )""")),
       "YAML node of type Mapping \\(with size 1 and keys \\{outer_value\\}\\)"
-      " has invalid merge key type \\(Sequence-of-non-Mapping\\) within entry"
-      " for <root>\\.");
+      " has invalid merge key type \\(Sequence-of-non-Mapping\\)\\.");
 }
 
 // This finds nothing when a scalar was wanted, because the name had a typo.

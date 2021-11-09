@@ -212,8 +212,8 @@ void ContactResultsToLcmSystem<T>::CalcLcmContactOutput(
 
     const geometry::ContactSurface<T>& contact_surface =
         hydroelastic_contact_info.contact_surface();
-    const geometry::SurfaceMesh<T>& mesh_W = contact_surface.mesh_W();
-    surface_msg.num_triangles = mesh_W.num_faces();
+    const geometry::TriangleSurfaceMesh<T>& mesh_W = contact_surface.mesh_W();
+    surface_msg.num_triangles = mesh_W.num_triangles();
     surface_msg.triangles.resize(surface_msg.num_triangles);
     surface_msg.num_quadrature_points = quadrature_point_data.size();
     surface_msg.quadrature_point_data.resize(surface_msg.num_quadrature_points);
@@ -243,19 +243,19 @@ void ContactResultsToLcmSystem<T>::CalcLcmContactOutput(
 
     // Loop through each contact triangle on the contact surface.
     const auto& field = contact_surface.e_MN();
-    for (geometry::SurfaceFaceIndex j(0); j < surface_msg.num_triangles; ++j) {
+    for (int j = 0; j < surface_msg.num_triangles; ++j) {
       lcmt_hydroelastic_contact_surface_tri_for_viz& tri_msg =
           surface_msg.triangles[j];
 
       // Get the three vertices.
       const auto& face = mesh_W.element(j);
-      const geometry::SurfaceVertex<T>& vA = mesh_W.vertex(face.vertex(0));
-      const geometry::SurfaceVertex<T>& vB = mesh_W.vertex(face.vertex(1));
-      const geometry::SurfaceVertex<T>& vC = mesh_W.vertex(face.vertex(2));
+      const Vector3<T>& vA = mesh_W.vertex(face.vertex(0));
+      const Vector3<T>& vB = mesh_W.vertex(face.vertex(1));
+      const Vector3<T>& vC = mesh_W.vertex(face.vertex(2));
 
-      write_double3(vA.r_MV(), tri_msg.p_WA);
-      write_double3(vB.r_MV(), tri_msg.p_WB);
-      write_double3(vC.r_MV(), tri_msg.p_WC);
+      write_double3(vA, tri_msg.p_WA);
+      write_double3(vB, tri_msg.p_WB);
+      write_double3(vC, tri_msg.p_WC);
 
       // Record the pressures.
       tri_msg.pressure_A =

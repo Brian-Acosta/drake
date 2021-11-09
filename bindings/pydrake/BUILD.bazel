@@ -122,20 +122,21 @@ drake_pybind_library(
     name = "geometry_py",
     cc_deps = [
         "//bindings/pydrake:documentation_pybind",
-        "//bindings/pydrake/common:cpp_template_pybind",
         "//bindings/pydrake/common:default_scalars_pybind",
         "//bindings/pydrake/common:deprecation_pybind",
+        "//bindings/pydrake/common:identifier_pybind",
         "//bindings/pydrake/common:type_pack",
         "//bindings/pydrake/common:type_safe_index_pybind",
         "//bindings/pydrake/common:value_pybind",
-        "//lcmtypes:viewer",
     ],
     cc_srcs = [
-        "geometry_py_all.cc",
+        "geometry_py.cc",
         "geometry_py.h",
         "geometry_py_common.cc",
         "geometry_py_hydro.cc",
         "geometry_py_optimization.cc",
+        "geometry_py_render.cc",
+        "geometry_py_scene_graph.cc",
         "geometry_py_visualizers.cc",
     ],
     package_info = PACKAGE_INFO,
@@ -238,7 +239,11 @@ drake_pybind_library(
         ":symbolic_types_pybind",
         "//bindings/pydrake:documentation_pybind",
     ],
-    cc_srcs = ["symbolic_py.cc"],
+    cc_srcs = [
+        "symbolic_py.cc",
+        "symbolic_py_unapply.cc",
+        "symbolic_py_unapply.h",
+    ],
     package_info = PACKAGE_INFO,
     py_deps = [
         ":module_py",
@@ -483,22 +488,6 @@ drake_py_unittest(
 )
 
 drake_py_unittest(
-    name = "geometry_all_test",
-    data = [
-        "//geometry:test_obj_files",
-        "//systems/sensors:test_models",
-    ],
-    deps = [
-        ":geometry_py",
-        "//bindings/pydrake:perception_py",
-        "//bindings/pydrake/common/test_utilities",
-        "//bindings/pydrake/multibody:plant_py",
-        "//bindings/pydrake/systems:analysis_py",
-        "//bindings/pydrake/systems:sensors_py",
-    ],
-)
-
-drake_py_unittest(
     name = "frame_id_test",
     deps = [
         ":geometry_py",
@@ -510,6 +499,7 @@ drake_py_unittest(
     deps = [
         ":geometry_py",
         "//bindings/pydrake/common/test_utilities",
+        "//bindings/pydrake/multibody:parsing_py",
         "//bindings/pydrake/multibody:plant_py",
     ],
 )
@@ -529,7 +519,18 @@ drake_py_unittest(
     deps = [
         ":geometry_py",
         ":math_py",
+        "//bindings/pydrake/multibody:parsing_py",
+        "//bindings/pydrake/multibody:plant_py",
         "//bindings/pydrake/solvers:mathematicalprogram_py",
+    ],
+)
+
+drake_py_unittest(
+    name = "geometry_render_test",
+    deps = [
+        ":geometry_py",
+        "//bindings/pydrake/common/test_utilities",
+        "//bindings/pydrake/systems:sensors_py",
     ],
 )
 
@@ -552,12 +553,22 @@ drake_py_unittest(
 )
 
 drake_py_unittest(
+    name = "geometry_scene_graph_test",
+    deps = [
+        ":geometry_py",
+        "//bindings/pydrake/common/test_utilities",
+        "//bindings/pydrake/systems:sensors_py",
+    ],
+)
+
+drake_py_unittest(
     name = "geometry_visualizers_test",
     deps = [
         ":geometry_py",
         ":lcm_py",
         ":perception_py",
         "//bindings/pydrake/common/test_utilities",
+        "//bindings/pydrake/multibody:plant_py",
         "//bindings/pydrake/systems:analysis_py",
         "//bindings/pydrake/systems:lcm_py",
     ],

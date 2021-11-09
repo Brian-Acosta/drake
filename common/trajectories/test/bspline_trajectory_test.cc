@@ -12,7 +12,7 @@
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
 #include "drake/common/test_utilities/expect_throws_message.h"
 #include "drake/common/trajectories/trajectory.h"
-#include "drake/common/yaml/yaml_read_archive.h"
+#include "drake/common/yaml/yaml_io.h"
 #include "drake/math/autodiff_gradient.h"
 #include "drake/math/bspline_basis.h"
 #include "drake/math/compute_numerical_gradient.h"
@@ -37,7 +37,7 @@ using math::KnotVectorType;
 using math::NumericalGradientMethod;
 using math::NumericalGradientOption;
 using symbolic::Expression;
-using yaml::YamlReadArchive;
+using yaml::LoadYamlString;
 
 namespace {
 template <typename T = double>
@@ -161,6 +161,16 @@ TYPED_TEST(BsplineTrajectoryTests, MakeDerivativeTest) {
     MatrixX<T> expected_derivative = ComputeNumericalGradient(
         calc_value, Vector1<T>{t(k)}, NumericalGradientOption{method});
     EXPECT_TRUE(CompareMatrices(derivative, expected_derivative, tolerance));
+  }
+
+  // Verify that MakeDerivative() returns 0 matrix for derivative of order
+  // higher than basis degree
+  derivative_trajectory = trajectory.MakeDerivative(trajectory.basis().order());
+  MatrixX<T> expected_derivative = MatrixX<T>::Zero(trajectory.rows(),
+                                                    trajectory.cols());
+  for (int k = 0; k < num_times; ++k) {
+    MatrixX<T> derivative = derivative_trajectory->value(t(k));
+    EXPECT_TRUE(CompareMatrices(derivative, expected_derivative, 0.0));
   }
 }
 
@@ -341,8 +351,7 @@ GTEST_TEST(BsplineTrajectorySerializeTests, GoodTest) {
       (MatrixX<double>(2, 3) << 2.0, 2.1, 2.2,
                                 2.3, 2.4, 2.5).finished(),
   };
-  BsplineTrajectory<double> dut{};
-  YamlReadArchive(YAML::Load(good)).Accept(&dut);
+  const auto dut = LoadYamlString<BsplineTrajectory<double>>(good);
   EXPECT_EQ(
       dut,
       BsplineTrajectory<double>(
@@ -363,9 +372,8 @@ const char* const not_enough_control_points = R"""(
       - [1.3, 1.4, 1.5]
 )""";
 GTEST_TEST(BsplineTrajectorySerializeTests, NotEnoughControlPointsTest) {
-  BsplineTrajectory<double> dut{};
     DRAKE_EXPECT_THROWS_MESSAGE(
-      YamlReadArchive(YAML::Load(not_enough_control_points)).Accept(&dut),
+      LoadYamlString<BsplineTrajectory<double>>(not_enough_control_points),
       ".*CheckInvariants.*");
 }
 
