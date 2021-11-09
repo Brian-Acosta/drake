@@ -143,7 +143,7 @@ TEST_F(AffineSystemTest, ConvertScalarType) {
     EXPECT_EQ(converted.D(), D_);
     EXPECT_EQ(converted.y0(), y0_);
     EXPECT_TRUE(CompareMatrices(
-        math::autoDiffToValueMatrix(converted.get_default_state()), x0_, 0.0));
+        math::ExtractValue(converted.get_default_state()), x0_, 0.0));
     EXPECT_TRUE(CompareMatrices(
         converted.get_random_state_covariance(), Sigma_x0_, 1e-16));
   }));
@@ -229,7 +229,7 @@ GTEST_TEST(DiscreteAffineSystemTest, DiscreteTime) {
 
   Eigen::Vector3d x0(26, 27, 28);
 
-  context->get_mutable_discrete_state(0).SetFromVector(x0);
+  context->SetDiscreteState(0, x0);
   double u0 = 29;
   system.get_input_port().FixValue(context.get(), u0);
 

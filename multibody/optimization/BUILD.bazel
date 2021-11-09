@@ -178,8 +178,12 @@ drake_cc_library(
     deps = [
         "//common/trajectories",
         "//multibody/plant",
+        "//solvers:choose_best_solver",
+        "//solvers:clp_solver",
         "//solvers:mathematical_program",
-        "//solvers:solve",
+        "//solvers:mathematical_program_result",
+        "//solvers:mosek_solver",
+        "//solvers:solver_interface",
     ],
 )
 
@@ -277,11 +281,14 @@ drake_cc_googletest(
     data = [
         "//manipulation/models/iiwa_description:models",
     ],
+    use_default_main = False,
     deps = [
         ":toppra",
         "//common/test_utilities:eigen_matrix_compare",
         "//multibody/parsing",
         "//multibody/tree",
+        "//solvers:gurobi_solver",
+        "//solvers:mosek_solver",
     ],
 )
 

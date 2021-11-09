@@ -218,6 +218,7 @@ const T& System<T>::EvalNonConservativePower(const Context<T>& context) const {
   return entry.Eval<T>(context);
 }
 
+// Deprecated
 template <typename T>
 Eigen::VectorBlock<const VectorX<T>> System<T>::EvalEigenVectorInput(
     const Context<T>& context, int port_index) const {
@@ -964,14 +965,6 @@ InputPort<T>& System<T>::DeclareInputPort(
   InputPort<T>* port_ptr = port.get();
   this->AddInputPort(std::move(port));
   return *port_ptr;
-}
-
-// (This function is deprecated.)
-template <typename T>
-InputPort<T>& System<T>::DeclareInputPort(
-    PortDataType type, int size,
-    std::optional<RandomDistribution> random_type) {
-  return DeclareInputPort(kUseDefaultName, type, size, random_type);
 }
 
 template <typename T>

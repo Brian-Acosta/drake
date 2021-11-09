@@ -416,6 +416,30 @@ class RollPitchYaw {
     return M * alpha_AD_D + remainder;
   }
 
+  // Returns the time-derivative of the 3x3 matrix returned by the `this`
+  // %RollPitchYaw method MatrixRelatingAngularVelocityAToRpyDt().
+  // @param[in] rpyDt Time-derivative of `[r; p; y]`, i.e., `[ṙ; ṗ; ẏ]`.
+  // @see MatrixRelatingAngularVelocityAToRpyDt()
+  const Matrix3<T> CalcDtMatrixRelatingAngularVelocityInParentToRpyDt(
+      const Vector3<T>& rpyDt) const {
+    using std::cos;
+    using std::sin;
+    const T& p = pitch_angle();
+    const T& y = yaw_angle();
+    const T sp = sin(p), cp = cos(p);
+    const T sy = sin(y), cy = cos(y);
+    const T pDt = rpyDt(1);
+    const T yDt = rpyDt(2);
+    const T sp_pDt = sp * pDt;
+    const T cp_yDt = cp * yDt;
+    Matrix3<T> M;
+    // clang-format on
+    M << -cy * sp_pDt - sy * cp_yDt,   -cy * yDt,    T(0),
+         -sy * sp_pDt + cy * cp_yDt,   -sy * yDt,    T(0),
+                          -cp * pDt,         T(0),   T(0);
+    // clang-format off
+    return M;
+  }
  private:
   // Throws an exception if rpy is not a valid %RollPitchYaw.
   // @param[in] rpy an allegedly valid rotation matrix.
@@ -512,30 +536,6 @@ class RollPitchYaw {
     return M;
   }
 
-  // Returns the time-derivative of the 3x3 matrix returned by the `this`
-  // %RollPitchYaw method MatrixRelatingAngularVelocityAToRpyDt().
-  // @param[in] rpyDt Time-derivative of `[r; p; y]`, i.e., `[ṙ; ṗ; ẏ]`.
-  // @see MatrixRelatingAngularVelocityAToRpyDt()
-  const Matrix3<T> CalcDtMatrixRelatingAngularVelocityInParentToRpyDt(
-      const Vector3<T>& rpyDt) const {
-    using std::cos;
-    using std::sin;
-    const T& p = pitch_angle();
-    const T& y = yaw_angle();
-    const T sp = sin(p), cp = cos(p);
-    const T sy = sin(y), cy = cos(y);
-    const T pDt = rpyDt(1);
-    const T yDt = rpyDt(2);
-    const T sp_pDt = sp * pDt;
-    const T cp_yDt = cp * yDt;
-    Matrix3<T> M;
-    // clang-format on
-    M << -cy * sp_pDt - sy * cp_yDt,   -cy * yDt,    T(0),
-         -sy * sp_pDt + cy * cp_yDt,   -sy * yDt,    T(0),
-                          -cp * pDt,         T(0),   T(0);
-    // clang-format off
-    return M;
-  }
 
   // For `this` %RollPitchYaw with roll-pitch-yaw angles `[r; p; y]` which
   // relate the orientation of two generic frames A and D, returns the 3x3

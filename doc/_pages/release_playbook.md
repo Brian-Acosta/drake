@@ -39,6 +39,10 @@ Begin this process around 1 week prior to the intended release date.
     1. On the first run, use ``--action=create`` to bootstrap the file.
        * The output is draft release notes in ``doc/_release-notes/v0.N.0.md``.
     2. On the subsequent runs, use ``--action=update`` to refresh the file.
+       * Try to avoid updating the release notes to refer to changes newer than
+       the likely release, i.e., if you run ``--update`` on the morning you're
+       actually doing the release, be sure to pass the ``--target_commit=``
+       argument to avoid including commits that will not be part of the tag.
 6. For release notes, on an ongoing basis, clean up and relocate the commit
    notes to properly organized and wordsmithed bullet points. See [Polishing
    the release notes](#polishing-the-release-notes).
@@ -105,7 +109,7 @@ the main body of the document:
       has nothing still running (modulo the ``*-coverage`` builds, which we can
       ignore)
    3. Open the latest builds from the following builds:
-      1. <https://drake-jenkins.csail.mit.edu/view/Packaging/job/mac-catalina-unprovisioned-clang-bazel-nightly-snopt-packaging/>
+      1. <https://drake-jenkins.csail.mit.edu/view/Packaging/job/mac-big-sur-unprovisioned-clang-bazel-nightly-snopt-packaging/>
       2. <https://drake-jenkins.csail.mit.edu/view/Packaging/job/linux-bionic-unprovisioned-gcc-bazel-nightly-snopt-packaging/>
       3. <https://drake-jenkins.csail.mit.edu/view/Packaging/job/linux-focal-unprovisioned-gcc-bazel-nightly-snopt-packaging/>
    4. Check the logs for those packaging builds and find the URLs they posted
@@ -123,7 +127,10 @@ the main body of the document:
 10. Update the release notes to have the ``YYYYMMDD`` we choose, and to make
     sure that the nightly build git sha from the prior step matches the
     ``newest_commit`` whose changes are enumerated in the notes.  Some dates
-    are YYYYMMDD format, some are YYYY-MM-DD format; be sure to fix them all.
+    are YYYYMMDD format, some are YYYY-MM-DD format; be sure to manually fix
+    them all.
+   1. Update the github links within doc/_pages/from_binary.md to reflect the
+      upcoming v0.N.0 and YYYYMMDD.
 11. Merge the release notes PR
    1. After merge, go to <https://drake-jenkins.csail.mit.edu/view/Documentation/job/linux-bionic-unprovisioned-gcc-bazel-nightly-documentation/> and push "Build now".
       * If you don't have "Build now" click "Log in" first in upper right.
@@ -158,21 +165,28 @@ the main body of the document:
 1. Open the [tagged workspace](https://github.com/RobotLocomotion/drake/tree/v0.N.0/tools/workspace)
    (editing that URL to have the correct value for ``N``) and ensure that
    certain Drake-owned externals have sufficient tags:
-   1. Open ``models/repository.bzl`` and find the ``commit =`` used.
+   1. Open ``common_robotics_utilities/repository.bzl`` and find the ``commit =`` used.
+      1. Open
+         [ToyotaResearchInstitute/common_robotics_utilities](https://github.com/ToyotaResearchInstitute/common_robotics_utilities/releases)
+         and check whether that commit already has an associated release tag.
+      2. If not, then create a new release named ``v0.0.foo`` where ``foo`` is
+         the 8-digit datestamp associated with the ``commit`` in question (i.e.,
+         four digit year, two digit month, two digit day).
+   2. Open ``models/repository.bzl`` and find the ``commit =`` used.
       1. Open
          [RobotLocomotion/models](https://github.com/RobotLocomotion/models/releases)
          and check whether that commit already has an associated release tag.
       2. If not, then create a new release named ``v0.0.foo`` where ``foo`` is
          the 8-digit datestamp associated with the ``commit`` in question (i.e.,
          four digit year, two digit month, two digit day).
-   2. Open ``optitrack_driver/repository.bzl`` and find the ``commit =`` used.
+   3. Open ``optitrack_driver/repository.bzl`` and find the ``commit =`` used.
       1. Open
          [RobotLocomotion/optitrack-driver](https://github.com/RobotLocomotion/optitrack-driver/releases)
          and check whether that commit already has an associated release tag.
       2. If not, then create a new release named ``v0.0.foo`` where ``foo`` is
          the 8-digit datestamp associated with the ``commit`` in question (i.e.,
          four digit year, two digit month, two digit day).
-   3. Open ``styleguide/repository.bzl`` and find the ``commit =`` used.
+   4. Open ``styleguide/repository.bzl`` and find the ``commit =`` used.
       1. Open [RobotLocomotion/styleguide](https://github.com/RobotLocomotion/styleguide/releases)
          and check whether that commit already has an associated release tag.
       2. If not, then create a new release named ``v0.0.foo`` where ``foo`` is
