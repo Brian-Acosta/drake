@@ -1,16 +1,25 @@
 #include "drake/solvers/osqp_solver.h"
 
 #include <vector>
-
 #include <osqp.h>
 
 #include "drake/common/text_logging.h"
 #include "drake/math/eigen_sparse_triplet.h"
 #include "drake/solvers/mathematical_program.h"
 
+
 namespace drake {
 namespace solvers {
+
+void writeCSV(const std::string& path, const Eigen::MatrixXd& M) {
+  std::ofstream outfile;
+  outfile.open(path);
+  outfile << M.format(CSVFormat);
+  outfile.close();
+}
+
 namespace {
+
 void ParseQuadraticCosts(const MathematicalProgram& prog,
                          Eigen::SparseMatrix<c_float>* P,
                          std::vector<c_float>* q, double* constant_cost_term) {
@@ -327,6 +336,14 @@ void OsqpSolver::DoSolve(
   data->A = EigenSparseToCSC(A_sparse);
   data->l = l.data();
   data->u = u.data();
+
+  if (osqp_debug_){
+    writeCSV(save_path_ + "P.csv", Eigen::MatrixXd(P_sparse));
+    writeCSV(save_path_ + "q.csv", Eigen::Map<Eigen::VectorXd>(q.data(), q.size()));
+    writeCSV(save_path_ + "A.csv", Eigen::MatrixXd(A_sparse));
+    writeCSV(save_path_ + "l.csv", Eigen::Map<Eigen::VectorXd>(l.data(), l.size()));
+    writeCSV(save_path_ + "u.csv", Eigen::Map<Eigen::VectorXd>(u.data(), u.size()));
+  }
 
   // Define Solver settings as default.
   // Problem settings
