@@ -85,10 +85,11 @@ bazel test common:polynomial_test                    # Run one test.
 bazel test -c dbg common:polynomial_test             # Run one test in debug mode.
 bazel test --config=memcheck common:polynomial_test  # Run one test under memcheck (valgrind).
 bazel test --config=fastmemcheck common:*            # Run common's tests under memcheck, with minimal recompiling.
-bazel test --config=asan common:polynomial_test      # Run one test under AddressSanitizer.
 bazel test --config=kcov common:polynomial_test      # Run one test under kcov (see instructions below).
 bazel build -c dbg common:polynomial_test && \
   gdb bazel-bin/common/polynomial_test               # Run one test under gdb.
+
+CC=clang-9 CXX=clang++-9 bazel test -c dbg --config=asan common:polynomial_test  # Run one test under AddressSanitizer.
 
 bazel test --config lint //...                       # Only run style checks; don't build or test anything else.
 ```
@@ -268,6 +269,11 @@ To use kcov on Ubuntu 18.04 (Bionic), you must first run Drake's
 20.04 (Focal), the option is ignored. The macOS ``install_prereqs`` setup
 script does not install kcov, and passing a ``--with-kcov`` option is an error.
 
+In some cases, running kcov builds and regular builds from the same source
+tree will lead to Bazel error messages like "this rule is missing dependency
+declarations".  To resolve that problem, either run the kcov build from a
+fresh checkout, or else run a ``bazel clean``.
+
 To analyze test coverage, run one (or more) tests under ``kcov``:
 
 ```
@@ -295,3 +301,11 @@ data would be scattered within the directory tree linked as
 ```
 tools/dynamic_analysis/kcov_tool clean
 ```
+
+### kcov and Python
+
+Coverage reports for Python sources produced by kcov are useful, but can be
+misleading. As of Ubuntu 20.04 and kcov 38, Python reports do not render
+coverage for multi-line statements properly. Statements that use delimiter
+pairs to span more than two lines, or statements that use string token pasting
+across multiple lines may be mistakenly shown as only partially executed.

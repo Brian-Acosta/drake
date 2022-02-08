@@ -21,6 +21,8 @@
 #include "drake/common/symbolic_decompose.h"
 #include "drake/common/symbolic_monomial_util.h"
 #include "drake/math/matrix_util.h"
+#include "drake/solvers/binding.h"
+#include "drake/solvers/decision_variable.h"
 #include "drake/solvers/sos_basis_generator.h"
 
 namespace drake {
@@ -61,12 +63,13 @@ std::unique_ptr<MathematicalProgram> MathematicalProgram::Clone() const {
   // Add variables and indeterminates
   // AddDecisionVariables and AddIndeterminates also set
   // decision_variable_index_ and indeterminate_index_ properly.
-  new_prog->AddDecisionVariables(decision_variables_);
-  new_prog->AddIndeterminates(indeterminates_);
+  new_prog->AddDecisionVariables(this->decision_variables());
+  new_prog->AddIndeterminates(this->indeterminates());
   // Add costs
   new_prog->generic_costs_ = generic_costs_;
   new_prog->quadratic_costs_ = quadratic_costs_;
   new_prog->linear_costs_ = linear_costs_;
+  new_prog->l2norm_costs_ = l2norm_costs_;
 
   // Add constraints
   new_prog->generic_constraints_ = generic_constraints_;
@@ -119,32 +122,52 @@ MatrixXDecisionVariable MathematicalProgram::NewSymmetricContinuousVariables(
   return NewVariables(VarType::CONTINUOUS, rows, rows, true, names);
 }
 
-void MathematicalProgram::AddDecisionVariables(
-    const Eigen::Ref<const VectorXDecisionVariable>& decision_variables) {
-  const int num_existing_decision_vars = num_vars();
-  for (int i = 0; i < decision_variables.rows(); ++i) {
-    if (decision_variables(i).is_dummy()) {
-      throw std::runtime_error(fmt::format(
-          "decision_variables({}) should not be a dummy variable", i));
+namespace {
+template <typename T>
+VectorX<T> Flatten(const Eigen::Ref<const MatrixX<T>>& mat) {
+  if (mat.cols() == 1) {
+    return mat;
+  } else {
+    // Cannot use Eigen::Map to flatten the matrix since mat.outerStride() might
+    // not equal to mat.rows(), namely the data in mat is not in contiguous
+    // space on memory.
+    // TODO(hongkai.dai): figure out a better way that avoids copy and dynamic
+    // memory allocation.
+    VectorX<T> vec(mat.size());
+    for (int j = 0; j < mat.cols(); ++j) {
+      vec.segment(j * mat.rows(), mat.rows()) = mat.col(j);
     }
-    if (decision_variable_index_.find(decision_variables(i).get_id()) !=
-        decision_variable_index_.end()) {
-      throw std::runtime_error(fmt::format("{} is already a decision variable.",
-                                           decision_variables(i)));
-    }
-    if (indeterminates_index_.find(decision_variables(i).get_id()) !=
-        indeterminates_index_.end()) {
-      throw std::runtime_error(fmt::format("{} is already an indeterminate.",
-                                           decision_variables(i)));
-    }
-    CheckVariableType(decision_variables(i).get_type());
-    decision_variable_index_.insert(std::make_pair(
-        decision_variables(i).get_id(), num_existing_decision_vars + i));
+    return vec;
   }
-  decision_variables_.conservativeResize(num_existing_decision_vars +
-                                         decision_variables.rows());
-  decision_variables_.tail(decision_variables.rows()) = decision_variables;
-  AppendNanToEnd(decision_variables.rows(), &x_initial_guess_);
+}
+}  // namespace
+
+void MathematicalProgram::AddDecisionVariables(
+    const Eigen::Ref<const MatrixXDecisionVariable>& decision_variables) {
+  for (int i = 0; i < decision_variables.rows(); ++i) {
+    for (int j = 0; j < decision_variables.cols(); ++j) {
+      const auto& var = decision_variables(i, j);
+      if (var.is_dummy()) {
+        throw std::runtime_error(fmt::format(
+            "decision_variables({}, {}) should not be a dummy variable", i, j));
+      }
+      if (decision_variable_index_.find(var.get_id()) !=
+          decision_variable_index_.end()) {
+        throw std::runtime_error(
+            fmt::format("{} is already a decision variable.", var));
+      }
+      if (indeterminates_index_.find(var.get_id()) !=
+          indeterminates_index_.end()) {
+        throw std::runtime_error(
+            fmt::format("{} is already an indeterminate.", var));
+      }
+      CheckVariableType(var.get_type());
+      decision_variables_.push_back(var);
+      const int var_index = decision_variables_.size() - 1;
+      decision_variable_index_.insert(std::make_pair(var.get_id(), var_index));
+    }
+  }
+  AppendNanToEnd(decision_variables.size(), &x_initial_guess_);
 }
 
 symbolic::Polynomial MathematicalProgram::NewFreePolynomialImpl(
@@ -188,13 +211,12 @@ symbolic::Polynomial MathematicalProgram::NewOddDegreeFreePolynomial(
 // symmetric matrix Q as decision variables, and return m' * Q * m as the new
 // polynomial, where m is the monomial basis.
 pair<symbolic::Polynomial, MatrixXDecisionVariable>
-MathematicalProgram::NewNonnegativePolynomial(
+MathematicalProgram::NewSosPolynomial(
     const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis,
     NonnegativePolynomial type) {
   const MatrixXDecisionVariable Q =
       NewSymmetricContinuousVariables(monomial_basis.size());
-  const symbolic::Polynomial p =
-      NewNonnegativePolynomial(Q, monomial_basis, type);
+  const symbolic::Polynomial p = NewSosPolynomial(Q, monomial_basis, type);
   return std::make_pair(p, Q);
 }
 
@@ -218,7 +240,7 @@ symbolic::Polynomial ComputePolynomialFromMonomialBasisAndGramMatrix(
 }
 }  // namespace
 
-symbolic::Polynomial MathematicalProgram::NewNonnegativePolynomial(
+symbolic::Polynomial MathematicalProgram::NewSosPolynomial(
     const Eigen::Ref<const MatrixX<symbolic::Variable>>& gramian,
     const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis,
     NonnegativePolynomial type) {
@@ -245,27 +267,33 @@ symbolic::Polynomial MathematicalProgram::NewNonnegativePolynomial(
 }
 
 pair<symbolic::Polynomial, MatrixXDecisionVariable>
-MathematicalProgram::NewNonnegativePolynomial(
-    const symbolic::Variables& indeterminates, int degree,
-    NonnegativePolynomial type) {
+MathematicalProgram::NewSosPolynomial(const symbolic::Variables& indeterminates,
+                                      int degree, NonnegativePolynomial type) {
   DRAKE_DEMAND(degree > 0 && degree % 2 == 0);
   const drake::VectorX<symbolic::Monomial> x{
       MonomialBasis(indeterminates, degree / 2)};
-  return NewNonnegativePolynomial(x, type);
+  return NewSosPolynomial(x, type);
 }
 
 std::pair<symbolic::Polynomial, MatrixXDecisionVariable>
-MathematicalProgram::NewSosPolynomial(
-    const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis) {
-  return NewNonnegativePolynomial(
-      monomial_basis, MathematicalProgram::NonnegativePolynomial::kSos);
+MathematicalProgram::NewNonnegativePolynomial(
+    const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis,
+    NonnegativePolynomial type) {
+  return NewSosPolynomial(monomial_basis, type);
+}
+
+symbolic::Polynomial MathematicalProgram::NewNonnegativePolynomial(
+    const Eigen::Ref<const MatrixX<symbolic::Variable>>& gramian,
+    const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis,
+    NonnegativePolynomial type) {
+  return NewSosPolynomial(gramian, monomial_basis, type);
 }
 
 pair<symbolic::Polynomial, MatrixXDecisionVariable>
-MathematicalProgram::NewSosPolynomial(const Variables& indeterminates,
-                                      const int degree) {
-  return NewNonnegativePolynomial(
-      indeterminates, degree, MathematicalProgram::NonnegativePolynomial::kSos);
+MathematicalProgram::NewNonnegativePolynomial(const Variables& indeterminates,
+                                              const int degree,
+                                              NonnegativePolynomial type) {
+  return NewSosPolynomial(indeterminates, degree, type);
 }
 
 std::tuple<symbolic::Polynomial, MatrixXDecisionVariable,
@@ -280,8 +308,8 @@ MathematicalProgram::NewEvenDegreeNonnegativePolynomial(
       OddDegreeMonomialBasis(indeterminates, degree / 2);
   symbolic::Polynomial p1, p2;
   MatrixXDecisionVariable Q_ee, Q_oo;
-  std::tie(p1, Q_ee) = NewNonnegativePolynomial(m_e, type);
-  std::tie(p2, Q_oo) = NewNonnegativePolynomial(m_o, type);
+  std::tie(p1, Q_ee) = NewSosPolynomial(m_e, type);
+  std::tie(p2, Q_oo) = NewSosPolynomial(m_o, type);
   const symbolic::Polynomial p = p1 + p2;
   return std::make_tuple(p, Q_oo, Q_ee);
 }
@@ -357,31 +385,29 @@ MatrixXIndeterminate MathematicalProgram::NewIndeterminates(
 }
 
 void MathematicalProgram::AddIndeterminates(
-    const Eigen::Ref<const VectorXDecisionVariable>& new_indeterminates) {
-  const int num_old_indeterminates = num_indeterminates();
+    const Eigen::Ref<const MatrixXDecisionVariable>& new_indeterminates) {
   for (int i = 0; i < new_indeterminates.rows(); ++i) {
-    if (new_indeterminates(i).is_dummy()) {
-      throw std::runtime_error(fmt::format(
-          "new_indeterminates({}) should not be a dummy variable.", i));
+    for (int j = 0; j < new_indeterminates.cols(); ++j) {
+      const auto& var = new_indeterminates(i, j);
+      if (var.is_dummy()) {
+        throw std::runtime_error(fmt::format(
+            "new_indeterminates({},{}) should not be a dummy variable.", i, j));
+      }
+      if (indeterminates_index_.find(var.get_id()) !=
+              indeterminates_index_.end() ||
+          decision_variable_index_.find(var.get_id()) !=
+              decision_variable_index_.end()) {
+        throw std::runtime_error(
+            fmt::format("{} already exists in the optimization program.", var));
+      }
+      if (var.get_type() != symbolic::Variable::Type::CONTINUOUS) {
+        throw std::runtime_error("indeterminate should of type CONTINUOUS.\n");
+      }
+      const int var_index = indeterminates_.size();
+      indeterminates_index_.insert(std::make_pair(var.get_id(), var_index));
+      indeterminates_.push_back(var);
     }
-    if (indeterminates_index_.find(new_indeterminates(i).get_id()) !=
-            indeterminates_index_.end() ||
-        decision_variable_index_.find(new_indeterminates(i).get_id()) !=
-            decision_variable_index_.end()) {
-      throw std::runtime_error(
-          fmt::format("{} already exists in the optimization program.",
-                      new_indeterminates(i)));
-    }
-    if (new_indeterminates(i).get_type() !=
-        symbolic::Variable::Type::CONTINUOUS) {
-      throw std::runtime_error("indeterminate should of type CONTINUOUS.\n");
-    }
-    indeterminates_index_.insert(std::make_pair(new_indeterminates(i).get_id(),
-                                                num_old_indeterminates + i));
   }
-  indeterminates_.conservativeResize(num_old_indeterminates +
-                                     new_indeterminates.rows());
-  indeterminates_.tail(new_indeterminates.rows()) = new_indeterminates;
 }
 
 Binding<VisualizationCallback> MathematicalProgram::AddVisualizationCallback(
@@ -401,6 +427,8 @@ Binding<Cost> MathematicalProgram::AddCost(const Binding<Cost>& binding) {
     return AddCost(internal::BindingDynamicCast<QuadraticCost>(binding));
   } else if (dynamic_cast<LinearCost*>(cost)) {
     return AddCost(internal::BindingDynamicCast<LinearCost>(binding));
+  } else if (dynamic_cast<L2NormCost*>(cost)) {
+    return AddCost(internal::BindingDynamicCast<L2NormCost>(binding));
   } else {
     CheckBinding(binding);
     required_capabilities_.insert(ProgramAttribute::kGenericCost);
@@ -467,6 +495,46 @@ Binding<QuadraticCost> MathematicalProgram::AddQuadraticCost(
   return AddQuadraticCost(Q, b, 0., vars, is_convex);
 }
 
+Binding<L2NormCost> MathematicalProgram::AddCost(
+    const Binding<L2NormCost>& binding) {
+  CheckBinding(binding);
+  required_capabilities_.insert(ProgramAttribute::kL2NormCost);
+  l2norm_costs_.push_back(binding);
+  return l2norm_costs_.back();
+}
+
+Binding<L2NormCost> MathematicalProgram::AddL2NormCost(
+    const Eigen::Ref<const Eigen::MatrixXd>& A,
+    const Eigen::Ref<const Eigen::VectorXd>& b,
+    const Eigen::Ref<const VectorXDecisionVariable>& vars) {
+  return AddCost(std::make_shared<L2NormCost>(A, b), vars);
+}
+
+std::tuple<symbolic::Variable, Binding<LinearCost>,
+           Binding<LorentzConeConstraint>>
+MathematicalProgram::AddL2NormCostUsingConicConstraint(
+    const Eigen::Ref<const Eigen::MatrixXd>& A,
+    const Eigen::Ref<const Eigen::VectorXd>& b,
+    const Eigen::Ref<const VectorXDecisionVariable>& vars) {
+  auto s = this->NewContinuousVariables<1>("slack")(0);
+  auto linear_cost =
+      this->AddLinearCost(Vector1d(1), 0, Vector1<symbolic::Variable>(s));
+  // A_full = [1 0]
+  //          [0 A]
+  // b_full = [0 b]
+  // A_full * [s ; vars] + b_full = [s, A*vars+b]
+  Eigen::MatrixXd A_full(A.rows() + 1, A.cols() + 1);
+  A_full.setZero();
+  A_full(0, 0) = 1;
+  A_full.bottomRightCorner(A.rows(), A.cols()) = A;
+  Eigen::VectorXd b_full(b.rows() + 1);
+  b_full(0) = 0;
+  b_full.bottomRows(b.rows()) = b;
+  auto lorentz_cone_constraint = this->AddLorentzConeConstraint(
+      A_full, b_full, {Vector1<symbolic::Variable>(s), vars});
+  return std::make_tuple(s, linear_cost, lorentz_cone_constraint);
+}
+
 Binding<PolynomialCost> MathematicalProgram::AddPolynomialCost(
     const Expression& e) {
   auto binding = AddCost(internal::ParsePolynomialCost(e));
@@ -477,7 +545,9 @@ Binding<Cost> MathematicalProgram::AddCost(const Expression& e) {
   return AddCost(internal::ParseCost(e));
 }
 
-void MathematicalProgram::AddMaximizeLogDeterminantSymmetricMatrixCost(
+std::tuple<Binding<LinearCost>, VectorX<symbolic::Variable>,
+           MatrixX<symbolic::Expression>>
+MathematicalProgram::AddMaximizeLogDeterminantCost(
     const Eigen::Ref<const MatrixX<symbolic::Expression>>& X) {
   DRAKE_DEMAND(X.rows() == X.cols());
   const int X_rows = X.rows();
@@ -509,10 +579,18 @@ void MathematicalProgram::AddMaximizeLogDeterminantSymmetricMatrixCost(
         Vector3<symbolic::Expression>(Z(i, i), 1, t(i)));
   }
 
-  AddLinearCost(-t.cast<symbolic::Expression>().sum());
+  const auto cost = AddLinearCost(-Eigen::VectorXd::Ones(t.rows()), t);
+  return std::make_tuple(cost, std::move(t), std::move(Z));
 }
 
-void MathematicalProgram::AddMaximizeGeometricMeanCost(
+std::tuple<Binding<LinearCost>, VectorX<symbolic::Variable>,
+           MatrixX<symbolic::Expression>>
+MathematicalProgram::AddMaximizeLogDeterminantSymmetricMatrixCost(
+    const Eigen::Ref<const MatrixX<symbolic::Expression>>& X) {
+  return AddMaximizeLogDeterminantCost(X);
+}
+
+Binding<LinearCost> MathematicalProgram::AddMaximizeGeometricMeanCost(
     const Eigen::Ref<const Eigen::MatrixXd>& A,
     const Eigen::Ref<const Eigen::VectorXd>& b,
     const Eigen::Ref<const VectorX<symbolic::Variable>>& x) {
@@ -565,13 +643,12 @@ void MathematicalProgram::AddMaximizeGeometricMeanCost(
     AddRotatedLorentzConeConstraint(C, d, xw);
   }
   if (w.rows() == 1) {
-    AddLinearCost(-w(0));
-    return;
+    return AddLinearCost(-w(0));
   }
-  AddMaximizeGeometricMeanCost(w, 1);
+  return AddMaximizeGeometricMeanCost(w, 1);
 }
 
-void MathematicalProgram::AddMaximizeGeometricMeanCost(
+Binding<LinearCost> MathematicalProgram::AddMaximizeGeometricMeanCost(
     const Eigen::Ref<const VectorX<symbolic::Variable>>& x, double c) {
   if (c <= 0) {
     throw std::invalid_argument(
@@ -615,10 +692,9 @@ void MathematicalProgram::AddMaximizeGeometricMeanCost(
         C, d, Vector2<symbolic::Variable>(x(x.rows() - 1), w(w.rows() - 1)));
   }
   if (x.rows() == 2) {
-    AddLinearCost(-c * w(0));
-    return;
+    return AddLinearCost(-c * w(0));
   }
-  AddMaximizeGeometricMeanCost(w);
+  return AddMaximizeGeometricMeanCost(w);
 }
 
 Binding<Constraint> MathematicalProgram::AddConstraint(
@@ -666,10 +742,15 @@ Binding<Constraint> MathematicalProgram::AddConstraint(const Expression& e,
 }
 
 Binding<Constraint> MathematicalProgram::AddConstraint(
-    const Eigen::Ref<const VectorX<Expression>>& v,
-    const Eigen::Ref<const Eigen::VectorXd>& lb,
-    const Eigen::Ref<const Eigen::VectorXd>& ub) {
-  return AddConstraint(internal::ParseConstraint(v, lb, ub));
+    const Eigen::Ref<const MatrixX<Expression>>& v,
+    const Eigen::Ref<const Eigen::MatrixXd>& lb,
+    const Eigen::Ref<const Eigen::MatrixXd>& ub) {
+  DRAKE_DEMAND(v.rows() == lb.rows());
+  DRAKE_DEMAND(v.rows() == ub.rows());
+  DRAKE_DEMAND(v.cols() == lb.cols());
+  DRAKE_DEMAND(v.cols() == ub.cols());
+  return AddConstraint(
+      internal::ParseConstraint(Flatten(v), Flatten(lb), Flatten(ub)));
 }
 
 Binding<Constraint> MathematicalProgram::AddConstraint(
@@ -696,10 +777,15 @@ Binding<LinearConstraint> MathematicalProgram::AddLinearConstraint(
 }
 
 Binding<LinearConstraint> MathematicalProgram::AddLinearConstraint(
-    const Eigen::Ref<const VectorX<Expression>>& v,
-    const Eigen::Ref<const Eigen::VectorXd>& lb,
-    const Eigen::Ref<const Eigen::VectorXd>& ub) {
-  Binding<Constraint> binding = internal::ParseConstraint(v, lb, ub);
+    const Eigen::Ref<const MatrixX<Expression>>& v,
+    const Eigen::Ref<const Eigen::MatrixXd>& lb,
+    const Eigen::Ref<const Eigen::MatrixXd>& ub) {
+  DRAKE_DEMAND(v.rows() == lb.rows());
+  DRAKE_DEMAND(v.rows() == ub.rows());
+  DRAKE_DEMAND(v.cols() == lb.cols());
+  DRAKE_DEMAND(v.cols() == ub.cols());
+  Binding<Constraint> binding =
+      internal::ParseConstraint(Flatten(v), Flatten(lb), Flatten(ub));
   Constraint* constraint = binding.evaluator().get();
   if (dynamic_cast<LinearConstraint*>(constraint)) {
     return AddConstraint(
@@ -871,12 +957,17 @@ MathematicalProgram::AddRotatedLorentzConeConstraint(
 }
 
 Binding<BoundingBoxConstraint> MathematicalProgram::AddBoundingBoxConstraint(
-    const Eigen::Ref<const Eigen::VectorXd>& lb,
-    const Eigen::Ref<const Eigen::VectorXd>& ub,
-    const Eigen::Ref<const VectorXDecisionVariable>& vars) {
+    const Eigen::Ref<const Eigen::MatrixXd>& lb,
+    const Eigen::Ref<const Eigen::MatrixXd>& ub,
+    const Eigen::Ref<const MatrixXDecisionVariable>& vars) {
+  DRAKE_DEMAND(lb.rows() == ub.rows());
+  DRAKE_DEMAND(lb.rows() == vars.rows());
+  DRAKE_DEMAND(lb.cols() == ub.cols());
+  DRAKE_DEMAND(lb.cols() == vars.cols());
   shared_ptr<BoundingBoxConstraint> constraint =
-      make_shared<BoundingBoxConstraint>(lb, ub);
-  return AddConstraint(Binding<BoundingBoxConstraint>(constraint, vars));
+      make_shared<BoundingBoxConstraint>(Flatten(lb), Flatten(ub));
+  return AddConstraint(
+      Binding<BoundingBoxConstraint>(constraint, Flatten(vars)));
 }
 
 Binding<LinearComplementarityConstraint> MathematicalProgram::AddConstraint(
@@ -901,12 +992,17 @@ MathematicalProgram::AddLinearComplementarityConstraint(
 }
 
 Binding<Constraint> MathematicalProgram::AddPolynomialConstraint(
-    const VectorXPoly& polynomials,
-    const vector<Polynomiald::VarType>& poly_vars, const Eigen::VectorXd& lb,
-    const Eigen::VectorXd& ub,
+    const Eigen::Ref<const MatrixX<Polynomiald>>& polynomials,
+    const vector<Polynomiald::VarType>& poly_vars,
+    const Eigen::Ref<const Eigen::MatrixXd>& lb,
+    const Eigen::Ref<const Eigen::MatrixXd>& ub,
     const Eigen::Ref<const VectorXDecisionVariable>& vars) {
-  auto constraint =
-      internal::MakePolynomialConstraint(polynomials, poly_vars, lb, ub);
+  DRAKE_DEMAND(polynomials.rows() == lb.rows());
+  DRAKE_DEMAND(polynomials.rows() == ub.rows());
+  DRAKE_DEMAND(polynomials.cols() == lb.cols());
+  DRAKE_DEMAND(polynomials.cols() == ub.cols());
+  auto constraint = internal::MakePolynomialConstraint(
+      Flatten(polynomials), poly_vars, Flatten(lb), Flatten(ub));
   return AddConstraint(constraint, vars);
 }
 
@@ -926,15 +1022,7 @@ Binding<PositiveSemidefiniteConstraint> MathematicalProgram::AddConstraint(
     shared_ptr<PositiveSemidefiniteConstraint> con,
     const Eigen::Ref<const MatrixXDecisionVariable>& symmetric_matrix_var) {
   DRAKE_ASSERT(math::IsSymmetric(symmetric_matrix_var));
-  int num_rows = symmetric_matrix_var.rows();
-  // TODO(hongkai.dai): this dynamic memory allocation/copying is ugly.
-  // TODO(eric.cousineau): See if Eigen::Map<> can be used (column-major)
-  VectorXDecisionVariable flat_symmetric_matrix_var(num_rows * num_rows);
-  for (int i = 0; i < num_rows; ++i) {
-    flat_symmetric_matrix_var.segment(i * num_rows, num_rows) =
-        symmetric_matrix_var.col(i);
-  }
-  return AddConstraint(CreateBinding(con, flat_symmetric_matrix_var));
+  return AddConstraint(CreateBinding(con, Flatten(symmetric_matrix_var)));
 }
 
 Binding<PositiveSemidefiniteConstraint>
@@ -1155,6 +1243,7 @@ std::vector<Binding<Cost>> MathematicalProgram::GetAllCosts() const {
   costlist.insert(costlist.end(), linear_costs_.begin(), linear_costs_.end());
   costlist.insert(costlist.end(), quadratic_costs_.begin(),
                   quadratic_costs_.end());
+  costlist.insert(costlist.end(), l2norm_costs_.begin(), l2norm_costs_.end());
   return costlist;
 }
 
@@ -1249,8 +1338,9 @@ namespace {
 // const Eigen::Ref<const VectorX<symbolic::Monomial>>&).
 MatrixXDecisionVariable DoAddSosConstraint(
     MathematicalProgram* const prog, const symbolic::Polynomial& p,
-    const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis) {
-  const auto pair = prog->NewSosPolynomial(monomial_basis);
+    const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis,
+    MathematicalProgram::NonnegativePolynomial type) {
+  const auto pair = prog->NewSosPolynomial(monomial_basis, type);
   const symbolic::Polynomial& sos_poly{pair.first};
   const MatrixXDecisionVariable& Q{pair.second};
 
@@ -1263,9 +1353,10 @@ MatrixXDecisionVariable DoAddSosConstraint(
 }
 // Body of MathematicalProgram::AddSosConstraint(const symbolic::Polynomial&).
 pair<MatrixXDecisionVariable, VectorX<symbolic::Monomial>> DoAddSosConstraint(
-    MathematicalProgram* const prog, const symbolic::Polynomial& p) {
+    MathematicalProgram* const prog, const symbolic::Polynomial& p,
+    MathematicalProgram::NonnegativePolynomial type) {
   const VectorX<symbolic::Monomial> m = ConstructMonomialBasis(p);
-  const MatrixXDecisionVariable Q = prog->AddSosConstraint(p, m);
+  const MatrixXDecisionVariable Q = prog->AddSosConstraint(p, m, type);
   return std::make_pair(Q, m);
 }
 
@@ -1273,47 +1364,54 @@ pair<MatrixXDecisionVariable, VectorX<symbolic::Monomial>> DoAddSosConstraint(
 
 MatrixXDecisionVariable MathematicalProgram::AddSosConstraint(
     const symbolic::Polynomial& p,
-    const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis) {
+    const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis,
+    MathematicalProgram::NonnegativePolynomial type) {
   const Variables indeterminates_vars{indeterminates()};
   if (Variables(p.indeterminates()).IsSubsetOf(indeterminates_vars) &&
       intersect(indeterminates_vars, Variables(p.decision_variables()))
           .empty()) {
-    return DoAddSosConstraint(this, p, monomial_basis);
+    return DoAddSosConstraint(this, p, monomial_basis, type);
   } else {
     // Need to reparse p, we first make a copy of p and reparse that.
     symbolic::Polynomial p_reparsed{p};
     Reparse(&p_reparsed);
-    return DoAddSosConstraint(this, p_reparsed, monomial_basis);
+    return DoAddSosConstraint(this, p_reparsed, monomial_basis, type);
   }
 }
 
 pair<MatrixXDecisionVariable, VectorX<symbolic::Monomial>>
-MathematicalProgram::AddSosConstraint(const symbolic::Polynomial& p) {
+MathematicalProgram::AddSosConstraint(
+    const symbolic::Polynomial& p,
+    MathematicalProgram::NonnegativePolynomial type) {
   const Variables indeterminates_vars{indeterminates()};
   if (Variables(p.indeterminates()).IsSubsetOf(indeterminates_vars) &&
       intersect(indeterminates_vars, Variables(p.decision_variables()))
           .empty()) {
-    return DoAddSosConstraint(this, p);
+    return DoAddSosConstraint(this, p, type);
   } else {
     // Need to reparse p, we first make a copy of p and reparse that.
     symbolic::Polynomial p_reparsed{p};
     Reparse(&p_reparsed);
-    return DoAddSosConstraint(this, p_reparsed);
+    return DoAddSosConstraint(this, p_reparsed, type);
   }
 }
 
 MatrixXDecisionVariable MathematicalProgram::AddSosConstraint(
     const symbolic::Expression& e,
-    const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis) {
+    const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis,
+    MathematicalProgram::NonnegativePolynomial type) {
   return AddSosConstraint(
-      symbolic::Polynomial{e, symbolic::Variables{indeterminates_}},
-      monomial_basis);
+      symbolic::Polynomial{e, symbolic::Variables{this->indeterminates()}},
+      monomial_basis, type);
 }
 
 pair<MatrixXDecisionVariable, VectorX<symbolic::Monomial>>
-MathematicalProgram::AddSosConstraint(const symbolic::Expression& e) {
+MathematicalProgram::AddSosConstraint(
+    const symbolic::Expression& e,
+    MathematicalProgram::NonnegativePolynomial type) {
   return AddSosConstraint(
-      symbolic::Polynomial{e, symbolic::Variables{indeterminates_}});
+      symbolic::Polynomial{e, symbolic::Variables{this->indeterminates()}},
+      type);
 }
 
 void MathematicalProgram::AddEqualityConstraintBetweenPolynomials(
@@ -1518,10 +1616,15 @@ void MathematicalProgram::UpdateRequiredCapability(
           "UpdateRequiredCapability(): should not handle quadratic constraint "
           "capability.");
     }
+    case ProgramAttribute::kL2NormCost: {
+      UpdateRequiredCapabilityImpl(query_capability, this->l2norm_costs(),
+                                   &required_capabilities_);
+      break;
+    }
     case ProgramAttribute::kBinaryVariable: {
       bool has_binary_var = false;
       for (int i = 0; i < num_vars(); ++i) {
-        if (decision_variables_(i).get_type() ==
+        if (decision_variables_[i].get_type() ==
             symbolic::Variable::Type::BINARY) {
           has_binary_var = true;
           break;
@@ -1553,6 +1656,10 @@ int MathematicalProgram::RemoveCost(const Binding<Cost>& cost) {
     return RemoveCostOrConstraintImpl(
         internal::BindingDynamicCast<LinearCost>(cost),
         ProgramAttribute::kLinearCost, &(this->linear_costs_));
+  } else if (dynamic_cast<L2NormCost*>(cost_evaluator)) {
+    return RemoveCostOrConstraintImpl(
+        internal::BindingDynamicCast<L2NormCost>(cost),
+        ProgramAttribute::kL2NormCost, &(this->l2norm_costs_));
   } else {
     return RemoveCostOrConstraintImpl(cost, ProgramAttribute::kGenericCost,
                                       &(this->generic_costs_));

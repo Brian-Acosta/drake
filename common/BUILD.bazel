@@ -53,6 +53,7 @@ drake_cc_package_library(
         ":sorted_pair",
         ":symbolic",
         ":symbolic_decompose",
+        ":symbolic_latex",
         ":temp_directory",
         ":type_safe_index",
         ":unused",
@@ -75,7 +76,6 @@ drake_cc_library(
         "drake_copyable.h",
         "drake_deprecated.h",
         "drake_throw.h",
-        "eigen_stl_types.h",
         "eigen_types.h",
         "never_destroyed.h",
         "text_logging.h",
@@ -253,6 +253,19 @@ drake_cc_library(
     ],
     hdrs = [
         "symbolic_decompose.h",
+    ],
+    deps = [
+        ":symbolic",
+    ],
+)
+
+drake_cc_library(
+    name = "symbolic_latex",
+    srcs = [
+        "symbolic_latex.cc",
+    ],
+    hdrs = [
+        "symbolic_latex.h",
     ],
     deps = [
         ":symbolic",
@@ -830,14 +843,6 @@ drake_cc_googletest(
 )
 
 drake_cc_googletest(
-    name = "eigen_stl_types_test",
-    copts = ["-Wno-cpp"],
-    deps = [
-        ":essential",
-    ],
-)
-
-drake_cc_googletest(
     name = "eigen_types_test",
     deps = [
         ":essential",
@@ -1168,6 +1173,16 @@ drake_cc_googletest(
 )
 
 drake_cc_googletest(
+    name = "symbolic_latex_test",
+    deps = [
+        ":essential",
+        ":symbolic",
+        ":symbolic_latex",
+        "//common/test_utilities:expect_throws_message",
+    ],
+)
+
+drake_cc_googletest(
     name = "symbolic_ldlt_test",
     deps = [
         ":essential",
@@ -1421,6 +1436,7 @@ drake_cc_googletest(
         ":value",
         "//common:essential",
         "//common/test_utilities:expect_no_throw",
+        "//common/test_utilities:expect_throws_message",
         "//systems/framework/test_utilities:my_vector",
     ],
 )

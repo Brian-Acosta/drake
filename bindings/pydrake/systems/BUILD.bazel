@@ -91,7 +91,6 @@ drake_pybind_library(
         "//bindings/pydrake:documentation_pybind",
         "//bindings/pydrake/common:cpp_template_pybind",
         "//bindings/pydrake/common:default_scalars_pybind",
-        "//bindings/pydrake/common:deprecation_pybind",
     ],
     cc_srcs = ["primitives_py.cc"],
     package_info = PACKAGE_INFO,
@@ -180,6 +179,7 @@ drake_pybind_library(
     cc_deps = [
         "//bindings/pydrake:documentation_pybind",
         "//bindings/pydrake:symbolic_types_pybind",
+        "//bindings/pydrake/common:deprecation_pybind",
     ],
     cc_srcs = ["trajectory_optimization_py.cc"],
     package_info = PACKAGE_INFO,
@@ -189,6 +189,7 @@ drake_pybind_library(
         "//bindings/pydrake/solvers:mathematicalprogram_py",
         "//bindings/pydrake:trajectories_py",
     ],
+    py_srcs = ["_trajectory_optimization_extra.py"],
 )
 
 # TODO(eric.cousineau): Put this under test once `pydot` is in
@@ -217,11 +218,6 @@ drake_pybind_library(
         ":lcm_pybind",
         "//bindings/pydrake:documentation_pybind",
         "//bindings/pydrake/common:deprecation_pybind",
-        "//lcmtypes:contact_results_for_viz",
-        "//lcmtypes:iiwa",
-        "//lcmtypes:image_array",
-        "//lcmtypes:quaternion",
-        "//lcmtypes:schunk",
     ],
     cc_srcs = [
         "lcm_py.cc",
@@ -450,6 +446,16 @@ drake_py_unittest(
     ],
 )
 
+drake_jupyter_py_binary(
+    name = "test/lifetime_test_notebook",
+    testonly = True,
+    add_test_rule = 1,
+    deps = [
+        ":framework_py",
+        ":primitives_py",
+    ],
+)
+
 drake_py_unittest(
     name = "custom_test",
     deps = [
@@ -558,7 +564,6 @@ drake_py_unittest(
         ":primitives_py",
         ":pyplot_visualizer_py",
         "//bindings/pydrake:trajectories_py",
-        "//bindings/pydrake/common/test_utilities:deprecation_py",
     ],
 )
 

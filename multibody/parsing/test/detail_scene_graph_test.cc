@@ -78,7 +78,16 @@ unique_ptr<sdf::Geometry> MakeSdfGeometryFromString(
       "</sdf>";
   sdf::SDFPtr sdf_parsed(new sdf::SDF());
   sdf::init(sdf_parsed);
-  sdf::readString(sdf_str, sdf_parsed);
+  sdf::Errors errors;
+  const bool success = sdf::readString(sdf_str, sdf_parsed, errors);
+  if (!success) {
+    for (const auto& error : errors) {
+      drake::log()->error("MakeSdfGeometryFromString parse error: {}", error);
+    }
+    // Note that we don't throw here, we just spam the console.  This is not
+    // great, but it matches the pre-existing behavior which wants this helper
+    // to return a default-constructed value in the case of syntax errors.
+  }
   sdf::ElementPtr geometry_element =
       sdf_parsed->Root()->GetElement("model")->
           GetElement("link")->GetElement("visual")->GetElement("geometry");
@@ -111,7 +120,16 @@ unique_ptr<sdf::Visual> MakeSdfVisualFromString(
       "</sdf>";
   sdf::SDFPtr sdf_parsed(new sdf::SDF());
   sdf::init(sdf_parsed);
-  sdf::readString(sdf_str, sdf_parsed);
+  sdf::Errors errors;
+  const bool success = sdf::readString(sdf_str, sdf_parsed, errors);
+  if (!success) {
+    for (const auto& error : errors) {
+      drake::log()->error("MakeSdfVisualFromString parse error: {}", error);
+    }
+    // Note that we don't throw here, we just spam the console.  This is not
+    // great, but it matches the pre-existing behavior which wants this helper
+    // to return a default-constructed value in the case of syntax errors.
+  }
   sdf::ElementPtr visual_element =
       sdf_parsed->Root()->GetElement("model")->
           GetElement("link")->GetElement("visual");
@@ -211,7 +229,6 @@ GTEST_TEST(SceneGraphParserDetail, CheckInvalidDrakeCapsules) {
       "</drake:capsule>");
   DRAKE_EXPECT_THROWS_MESSAGE(
       MakeShapeFromSdfGeometry(*no_radius_geometry, NoopResolveFilename),
-      std::runtime_error,
       "Element <radius> is required within element <drake:capsule>.");
   unique_ptr<sdf::Geometry> no_length_geometry = MakeSdfGeometryFromString(
       "<drake:capsule>"
@@ -219,7 +236,6 @@ GTEST_TEST(SceneGraphParserDetail, CheckInvalidDrakeCapsules) {
       "</drake:capsule>");
   DRAKE_EXPECT_THROWS_MESSAGE(
       MakeShapeFromSdfGeometry(*no_length_geometry, NoopResolveFilename),
-      std::runtime_error,
       "Element <length> is required within element <drake:capsule>.");
 }
 
@@ -284,7 +300,6 @@ GTEST_TEST(SceneGraphParserDetail, CheckInvalidEllipsoids) {
       "</drake:ellipsoid>");
   DRAKE_EXPECT_THROWS_MESSAGE(
       MakeShapeFromSdfGeometry(*no_a_geometry, NoopResolveFilename),
-      std::runtime_error,
       "Element <a> is required within element <drake:ellipsoid>.");
   unique_ptr<sdf::Geometry> no_b_geometry = MakeSdfGeometryFromString(
       "<drake:ellipsoid>"
@@ -293,7 +308,6 @@ GTEST_TEST(SceneGraphParserDetail, CheckInvalidEllipsoids) {
       "</drake:ellipsoid>");
   DRAKE_EXPECT_THROWS_MESSAGE(
       MakeShapeFromSdfGeometry(*no_b_geometry, NoopResolveFilename),
-      std::runtime_error,
       "Element <b> is required within element <drake:ellipsoid>.");
   unique_ptr<sdf::Geometry> no_c_geometry = MakeSdfGeometryFromString(
       "<drake:ellipsoid>"
@@ -302,7 +316,6 @@ GTEST_TEST(SceneGraphParserDetail, CheckInvalidEllipsoids) {
       "</drake:ellipsoid>");
   DRAKE_EXPECT_THROWS_MESSAGE(
       MakeShapeFromSdfGeometry(*no_c_geometry, NoopResolveFilename),
-      std::runtime_error,
       "Element <c> is required within element <drake:ellipsoid>.");
 }
 
@@ -372,7 +385,7 @@ GTEST_TEST(SceneGraphParserDetail, MakeMeshFromSdfGeometry) {
 GTEST_TEST(SceneGraphParserDetail, MakeConvexFromSdfGeometry) {
   const std::string absolute_file_path = "path/to/some/mesh.obj";
   unique_ptr<sdf::Geometry> sdf_geometry = MakeSdfGeometryFromString(
-      "<mesh xmlns:drake='drake.mit.edu'>"
+      "<mesh xmlns:drake='http://drake.mit.edu'>"
       "  <drake:declare_convex/>"
       "  <uri>" + absolute_file_path + "</uri>"
       "  <scale> 3 3 3 </scale>"
@@ -964,7 +977,6 @@ GTEST_TEST(SceneGraphParseDetail, AcceptingRenderers) {
         "</visual>");
     DRAKE_EXPECT_THROWS_MESSAGE(
       MakeVisualPropertiesFromSdfVisual(*sdf_visual, NoopResolveFilename),
-      std::runtime_error,
       "<drake:accepting_renderer> tag given without any name");
 }
 
@@ -1111,11 +1123,11 @@ GTEST_TEST(SceneGraphParserDetail, MakeProximityPropertiesForCollision) {
               geometry::internal::HydroelasticType::kRigid);
   }
 
-  // Case: specifies soft hydroelastic.
+  // Case: specifies compliant hydroelastic.
   {
     unique_ptr<sdf::Collision> sdf_collision = make_sdf_collision(R"""(
   <drake:proximity_properties>
-    <drake:soft_hydroelastic/>
+    <drake:compliant_hydroelastic/>
   </drake:proximity_properties>)""");
     ProximityProperties properties =
         MakeProximityPropertiesForCollision(*sdf_collision);
@@ -1126,18 +1138,32 @@ GTEST_TEST(SceneGraphParserDetail, MakeProximityPropertiesForCollision) {
               geometry::internal::HydroelasticType::kSoft);
   }
 
+  // TODO(16229): Remove this ad-hoc input sanitization when we resolve
+  //  issue 16229 "Diagnostics for unsupported SDFormat and URDF stanzas."
+  // Case: specifies unsupported drake:soft_hydroelastic -- should be an error.
+  {
+    unique_ptr<sdf::Collision> sdf_collision = make_sdf_collision(R"""(
+  <drake:proximity_properties>
+    <drake:soft_hydroelastic/>
+  </drake:proximity_properties>)""");
+    DRAKE_EXPECT_THROWS_MESSAGE(
+        MakeProximityPropertiesForCollision(*sdf_collision),
+        "A <collision> geometry has defined the unsupported tag "
+        "<drake:soft_hydroelastic>. Please change it to "
+        "<drake:compliant_hydroelastic>.");
+  }
+
   // Case: specifies both -- should be an error.
   {
     unique_ptr<sdf::Collision> sdf_collision = make_sdf_collision(R"""(
   <drake:proximity_properties>
     <drake:rigid_hydroelastic/>
-    <drake:soft_hydroelastic/>
+    <drake:compliant_hydroelastic/>
   </drake:proximity_properties>)""");
     DRAKE_EXPECT_THROWS_MESSAGE(
         MakeProximityPropertiesForCollision(*sdf_collision),
-        std::runtime_error,
         "A <collision> geometry has defined mutually-exclusive tags .*rigid.* "
-        "and .*soft.*");
+        "and .*compliant.*");
   }
 
   // Case: has no drake coefficients, only mu & m2 in ode: contains mu, mu2
@@ -1262,7 +1288,6 @@ GTEST_TEST(SceneGraphParserDetail,
       "</collision>");
   DRAKE_EXPECT_THROWS_MESSAGE(
       MakeCoulombFrictionFromSdfCollisionOde(*sdf_collision),
-      std::logic_error,
       "The given dynamic friction \\(.*\\) is greater than the given static "
       "friction \\(.*\\); dynamic friction must be less than or equal to "
       "static friction.");

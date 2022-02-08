@@ -182,16 +182,20 @@ void DefineGeometryOptimization(py::module m) {
     const auto& cls_doc = doc.VPolytope;
     py::class_<VPolytope, ConvexSet>(m, "VPolytope", cls_doc.doc)
         .def(py::init<const Eigen::Ref<const Eigen::MatrixXd>&>(),
-            py::arg("vertices"), cls_doc.ctor.doc_1args)
+            py::arg("vertices"), cls_doc.ctor.doc_vertices)
+        .def(py::init<const HPolyhedron&>(), py::arg("H"),
+            cls_doc.ctor.doc_hpolyhedron)
         .def(py::init<const QueryObject<double>&, GeometryId,
                  std::optional<FrameId>>(),
             py::arg("query_object"), py::arg("geometry_id"),
-            py::arg("reference_frame") = std::nullopt, cls_doc.ctor.doc_3args)
+            py::arg("reference_frame") = std::nullopt,
+            cls_doc.ctor.doc_scenegraph)
         .def("vertices", &VPolytope::vertices, cls_doc.vertices.doc)
         .def_static("MakeBox", &VPolytope::MakeBox, py::arg("lb"),
             py::arg("ub"), cls_doc.MakeBox.doc)
         .def_static("MakeUnitBox", &VPolytope::MakeUnitBox, py::arg("dim"),
-            cls_doc.MakeUnitBox.doc);
+            cls_doc.MakeUnitBox.doc)
+        .def("CalcVolume", &VPolytope::CalcVolume, cls_doc.CalcVolume.doc);
     py::implicitly_convertible<VPolytope, copyable_unique_ptr<ConvexSet>>();
   }
 
@@ -205,6 +209,9 @@ void DefineGeometryOptimization(py::module m) {
       .def_readwrite("termination_threshold",
           &IrisOptions::termination_threshold,
           doc.IrisOptions.termination_threshold.doc)
+      .def_readwrite("relative_termination_threshold",
+          &IrisOptions::relative_termination_threshold,
+          doc.IrisOptions.relative_termination_threshold.doc)
       .def_readwrite("configuration_space_margin",
           &IrisOptions::configuration_space_margin,
           doc.IrisOptions.configuration_space_margin.doc)
@@ -216,11 +223,13 @@ void DefineGeometryOptimization(py::module m) {
             "require_sample_point_is_contained={}, "
             "iteration_limit={}, "
             "termination_threshold={}, "
+            "relative_termination_threshold={}, "
             "configuration_space_margin={}, "
             "enable_ibex={}"
             ")")
             .format(self.require_sample_point_is_contained,
                 self.iteration_limit, self.termination_threshold,
+                self.relative_termination_threshold,
                 self.configuration_space_margin, self.enable_ibex);
       });
 
@@ -230,9 +239,27 @@ void DefineGeometryOptimization(py::module m) {
   m.def("MakeIrisObstacles", &MakeIrisObstacles, py::arg("query_object"),
       py::arg("reference_frame") = std::nullopt, doc.MakeIrisObstacles.doc);
 
-  m.def("IrisInConfigurationSpace", &IrisInConfigurationSpace, py::arg("plant"),
-      py::arg("context"), py::arg("sample"), py::arg("options") = IrisOptions(),
+  m.def("IrisInConfigurationSpace",
+      py::overload_cast<const multibody::MultibodyPlant<double>&,
+          const systems::Context<double>&, const IrisOptions&>(
+          &IrisInConfigurationSpace),
+      py::arg("plant"), py::arg("context"), py::arg("options") = IrisOptions(),
       doc.IrisInConfigurationSpace.doc);
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+  m.def("IrisInConfigurationSpace",
+      WrapDeprecated(doc.IrisInConfigurationSpace.doc_deprecated,
+          [](const multibody::MultibodyPlant<double>& plant,
+              const systems::Context<double>& context,
+              const Eigen::Ref<const Eigen::VectorXd>& sample,
+              const IrisOptions& options) {
+            return IrisInConfigurationSpace(plant, context, sample, options);
+          }),
+      py::arg("plant"), py::arg("context"), py::arg("sample"),
+      py::arg("options") = IrisOptions(),
+      doc.IrisInConfigurationSpace.doc_deprecated);
+#pragma GCC diagnostic pop
 
   // GraphOfConvexSets
   {
@@ -244,8 +271,8 @@ void DefineGeometryOptimization(py::module m) {
                 py::arg("name") = "", py_rvp::reference_internal,
                 cls_doc.AddVertex.doc)
             .def("AddEdge",
-                py::overload_cast<const GraphOfConvexSets::VertexId&,
-                    const GraphOfConvexSets::VertexId&, std::string>(
+                py::overload_cast<GraphOfConvexSets::VertexId,
+                    GraphOfConvexSets::VertexId, std::string>(
                     &GraphOfConvexSets::AddEdge),
                 py::arg("u_id"), py::arg("v_id"), py::arg("name") = "",
                 py_rvp::reference_internal, cls_doc.AddEdge.doc_by_id)
@@ -255,6 +282,22 @@ void DefineGeometryOptimization(py::module m) {
                     &GraphOfConvexSets::AddEdge),
                 py::arg("u"), py::arg("v"), py::arg("name") = "",
                 py_rvp::reference_internal, cls_doc.AddEdge.doc_by_reference)
+            .def("RemoveVertex",
+                py::overload_cast<GraphOfConvexSets::VertexId>(
+                    &GraphOfConvexSets::RemoveVertex),
+                py::arg("vertex_id"), cls_doc.RemoveVertex.doc_by_id)
+            .def("RemoveVertex",
+                py::overload_cast<const GraphOfConvexSets::Vertex&>(
+                    &GraphOfConvexSets::RemoveVertex),
+                py::arg("vertex"), cls_doc.RemoveVertex.doc_by_reference)
+            .def("RemoveEdge",
+                py::overload_cast<GraphOfConvexSets::EdgeId>(
+                    &GraphOfConvexSets::RemoveEdge),
+                py::arg("edge_id"), cls_doc.RemoveEdge.doc_by_id)
+            .def("RemoveEdge",
+                py::overload_cast<const GraphOfConvexSets::Edge&>(
+                    &GraphOfConvexSets::RemoveEdge),
+                py::arg("edge"), cls_doc.RemoveEdge.doc_by_reference)
             .def(
                 "Vertices",
                 [](GraphOfConvexSets* self) {
@@ -289,9 +332,8 @@ void DefineGeometryOptimization(py::module m) {
                 cls_doc.GetGraphvizString.doc)
             .def("SolveShortestPath",
                 overload_cast_explicit<solvers::MathematicalProgramResult,
-                    const GraphOfConvexSets::VertexId&,
-                    const GraphOfConvexSets::VertexId&, bool>(
-                    &GraphOfConvexSets::SolveShortestPath),
+                    GraphOfConvexSets::VertexId, GraphOfConvexSets::VertexId,
+                    bool>(&GraphOfConvexSets::SolveShortestPath),
                 py::arg("source_id"), py::arg("target_id"),
                 py::arg("convex_relaxation") = false,
                 cls_doc.SolveShortestPath.doc_by_id)

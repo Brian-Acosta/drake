@@ -41,8 +41,16 @@ py::object DoEval(const SomeObject* self, const systems::Context<T>& context) {
     }
     case systems::kAbstractValued: {
       const auto& abstract = self->template Eval<AbstractValue>(context);
-      py::object value_ref = py::cast(&abstract);
-      return value_ref.attr("get_value")();
+      // The storage for the abstract value is owned by the context, so we need
+      // to inform pybind that the abstract value reference should keep the
+      // entire context alive.  Note that `abstract_value_ref` itself will be
+      // immediately released (it's a local variable, and we don't return it)
+      // but in certain cases the return from `get_value` is an internal
+      // reference into the `abstract_value_ref`, and so will need to
+      // transitively keep the entire context alive as well.
+      py::object abstract_value_ref =
+          py::cast(&abstract, py_rvp::reference_internal, py::cast(&context));
+      return abstract_value_ref.attr("get_value")();
     }
   }
   DRAKE_UNREACHABLE();
@@ -529,6 +537,39 @@ void DoScalarDependentDefinitions(py::module m) {
             return out;
           },
           doc.DiagramBuilder.GetMutableSystems.doc)
+      .def(
+          "connection_map",
+          [](DiagramBuilder<T>* self) {
+            // N.B. This code is duplicated with Diagram's same-named function.
+            // Keep the two copies in sync. The detailed unit test is written
+            // against the Diagram copy of this function, not this one.
+            py::dict out;
+            py::object self_py = py::cast(self, py_rvp::reference);
+            for (auto& [input_locator, output_locator] :
+                self->connection_map()) {
+              py::object input_system_py =
+                  py::cast(input_locator.first, py_rvp::reference);
+              py::object input_port_index_py = py::cast(input_locator.second);
+              // Keep alive, ownership: `input_system_py` keeps `self` alive.
+              py_keep_alive(input_system_py, self_py);
+              py::tuple input_locator_py(2);
+              input_locator_py[0] = input_system_py;
+              input_locator_py[1] = input_port_index_py;
+
+              py::object output_system_py =
+                  py::cast(output_locator.first, py_rvp::reference);
+              py::object output_port_index_py = py::cast(output_locator.second);
+              // Keep alive, ownership: `output_system_py` keeps `self` alive.
+              py_keep_alive(output_system_py, self_py);
+              py::tuple output_locator_py(2);
+              output_locator_py[0] = output_system_py;
+              output_locator_py[1] = output_port_index_py;
+
+              out[input_locator_py] = output_locator_py;
+            }
+            return out;
+          },
+          doc.DiagramBuilder.connection_map.doc)
       .def("Connect",
           py::overload_cast<const OutputPort<T>&, const InputPort<T>&>(
               &DiagramBuilder<T>::Connect),
@@ -779,6 +820,11 @@ void DoScalarDependentDefinitions(py::module m) {
           overload_cast_explicit<DiscreteValues<T>&>(
               &State<T>::get_mutable_discrete_state),
           py_rvp::reference_internal, doc.State.get_mutable_discrete_state.doc)
+      .def("get_mutable_discrete_state",
+          overload_cast_explicit<BasicVector<T>&, int>(
+              &State<T>::get_mutable_discrete_state),
+          py::arg("index"), py_rvp::reference_internal,
+          doc.State.get_mutable_discrete_state.doc)
       .def("get_abstract_state",
           static_cast<const AbstractValues& (State<T>::*)() const>(
               &State<T>::get_abstract_state),
@@ -788,7 +834,15 @@ void DoScalarDependentDefinitions(py::module m) {
           [](State<T>* self) -> AbstractValues& {
             return self->get_mutable_abstract_state();
           },
-          py_rvp::reference_internal, doc.State.get_mutable_abstract_state.doc);
+          py_rvp::reference_internal,
+          doc.State.get_mutable_abstract_state.doc_0args)
+      .def(
+          "get_mutable_abstract_state",
+          [](State<T>* self, int index) -> AbstractValue& {
+            return self->get_mutable_abstract_state().get_mutable_value(index);
+          },
+          py::arg("index"), py_rvp::reference_internal,
+          doc.State.get_mutable_abstract_state.doc_1args);
 
   // - Constituents.
   auto continuous_state = DefineTemplateClassWithDefault<ContinuousState<T>>(

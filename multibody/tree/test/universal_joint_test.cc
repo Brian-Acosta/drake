@@ -192,17 +192,14 @@ TEST_F(UniversalJointTest, SetVelocityAndAccelerationLimits) {
   DRAKE_EXPECT_THROWS_MESSAGE(
       mutable_joint_->set_velocity_limits(VectorX<double>(2),
                                           VectorX<double>()),
-      std::runtime_error,
       ".* 'lower_limits.size\\(\\) == upper_limits.size\\(\\)' failed.");
   DRAKE_EXPECT_THROWS_MESSAGE(
       mutable_joint_->set_velocity_limits(VectorX<double>(),
                                           VectorX<double>(2)),
-      std::runtime_error,
       ".* 'lower_limits.size\\(\\) == upper_limits.size\\(\\)' failed.");
   // Lower limit is larger than upper limit.
   DRAKE_EXPECT_THROWS_MESSAGE(mutable_joint_->set_velocity_limits(
                                   Vector2d::Constant(2), Vector2d::Constant(0)),
-                              std::runtime_error,
                               ".* '\\(lower_limits.array\\(\\) <= "
                               "upper_limits.array\\(\\)\\).all\\(\\)' failed.");
 
@@ -215,19 +212,23 @@ TEST_F(UniversalJointTest, SetVelocityAndAccelerationLimits) {
   DRAKE_EXPECT_THROWS_MESSAGE(
       mutable_joint_->set_acceleration_limits(VectorX<double>(2),
                                               VectorX<double>()),
-      std::runtime_error,
       ".* 'lower_limits.size\\(\\) == upper_limits.size\\(\\)' failed.");
   DRAKE_EXPECT_THROWS_MESSAGE(
       mutable_joint_->set_acceleration_limits(VectorX<double>(),
                                               VectorX<double>(2)),
-      std::runtime_error,
       ".* 'lower_limits.size\\(\\) == upper_limits.size\\(\\)' failed.");
   // Lower limit is larger than upper limit.
   DRAKE_EXPECT_THROWS_MESSAGE(mutable_joint_->set_acceleration_limits(
                                   Vector2d::Constant(2), Vector2d::Constant(0)),
-                              std::runtime_error,
                               ".* '\\(lower_limits.array\\(\\) <= "
                               "upper_limits.array\\(\\)\\).all\\(\\)' failed.");
+}
+
+TEST_F(UniversalJointTest, NameSuffix) {
+  EXPECT_EQ(joint_->position_suffix(0), "qx");
+  EXPECT_EQ(joint_->position_suffix(1), "qy");
+  EXPECT_EQ(joint_->velocity_suffix(0), "wx");
+  EXPECT_EQ(joint_->velocity_suffix(1), "wy");
 }
 
 TEST_F(UniversalJointTest, DefaultAngles) {

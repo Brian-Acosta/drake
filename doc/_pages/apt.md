@@ -12,10 +12,16 @@ for additional compatibility details.
 To learn about other installation methods, refer to
 [Installation and Quickstart](/installation.html).
 
+If you experience any problems or questions with Drake, please
+[ask for help on Stack Overflow](/getting_help.html).
+
 Drake binary releases incorporate a pre-compiled version of
 [SNOPT](https://ccom.ucsd.edu/~optimizers/solvers/snopt/) as part of the
 [Mathematical Program toolbox](https://drake.mit.edu/doxygen_cxx/group__solvers.html).
 Thanks to Philip E. Gill and Elizabeth Wong for their kind support.
+
+Drake's apt packages do not support the Mosek nor Gurobi solvers. To use
+Mosek or Gurobi, you will need to [build Drake from source](/from_source.html).
 
 ## Stable Releases
 

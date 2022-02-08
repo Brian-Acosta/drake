@@ -7,6 +7,7 @@ cask 'adoptopenjdk' unless system '/usr/libexec/java_home --version 1.8+ --failf
 
 brew 'clp'
 brew 'cmake'
+brew 'curl'
 brew 'double-conversion'
 brew 'eigen'
 brew 'gcc'
@@ -30,7 +31,10 @@ brew 'spdlog'
 brew 'suite-sparse'
 brew 'tinyxml'
 brew 'tinyxml2'
+# NOTE: vtk@8.2.0 is needed for drake_visualizer, and
+# vtk@9.1.0 is needed for drake.
 brew 'robotlocomotion/director/vtk@8.2.0'
+brew 'robotlocomotion/director/vtk@9.1.0'
 brew 'xz'
 brew 'yaml-cpp'
 brew 'zeromq'

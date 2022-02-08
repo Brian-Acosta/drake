@@ -1,4 +1,6 @@
 from pydrake.solvers import mathematicalprogram as mp
+
+from pydrake.common.test_utilities.deprecation import catch_drake_warnings
 import pydrake.solvers.mathematicalprogram._testing as mp_testing
 from pydrake.solvers.gurobi import GurobiSolver
 from pydrake.solvers.snopt import SnoptSolver
@@ -60,10 +62,30 @@ class TestCost(unittest.TestCase):
         cost = mp.QuadraticCost(np.array([[1., 2.], [2., 6.]]), b, c)
         self.assertTrue(cost.is_convex())
 
+    def test_l1norm_cost(self):
+        A = np.array([[1., 2.], [-.4, .7]])
+        b = np.array([0.5, -.4])
+        cost = mp.L1NormCost(A=A, b=b)
+        np.testing.assert_allclose(cost.A(), A)
+        np.testing.assert_allclose(cost.b(), b)
+        cost.UpdateCoefficients(new_A=2*A, new_b=2*b)
+        np.testing.assert_allclose(cost.A(), 2*A)
+        np.testing.assert_allclose(cost.b(), 2*b)
+
     def test_l2norm_cost(self):
         A = np.array([[1., 2.], [-.4, .7]])
         b = np.array([0.5, -.4])
         cost = mp.L2NormCost(A=A, b=b)
+        np.testing.assert_allclose(cost.A(), A)
+        np.testing.assert_allclose(cost.b(), b)
+        cost.UpdateCoefficients(new_A=2*A, new_b=2*b)
+        np.testing.assert_allclose(cost.A(), 2*A)
+        np.testing.assert_allclose(cost.b(), 2*b)
+
+    def test_linfnorm_cost(self):
+        A = np.array([[1., 2.], [-.4, .7]])
+        b = np.array([0.5, -.4])
+        cost = mp.LInfNormCost(A=A, b=b)
         np.testing.assert_allclose(cost.A(), A)
         np.testing.assert_allclose(cost.b(), b)
         cost.UpdateCoefficients(new_A=2*A, new_b=2*b)
@@ -562,26 +584,52 @@ class TestMathematicalProgram(unittest.TestCase):
         self.assertTrue(np.all(eigs >= -tol))
         self.assertTrue(S[0, 1] >= -tol)
 
-    def test_nonnegative_polynomial(self):
+    def test_sos_polynomial(self):
         # Only check if the API works.
         prog = mp.MathematicalProgram()
         x = prog.NewIndeterminates(3, "x")
-        (poly1, gramian1) = prog.NewNonnegativePolynomial(
+        (poly1, gramian1) = prog.NewSosPolynomial(
             indeterminates=sym.Variables(x), degree=4,
             type=mp.MathematicalProgram.NonnegativePolynomial.kSdsos)
         self.assertIsInstance(poly1, sym.Polynomial)
         self.assertIsInstance(gramian1, np.ndarray)
 
         gramian2 = prog.NewSymmetricContinuousVariables(2)
-        poly2 = prog.NewNonnegativePolynomial(
+        poly2 = prog.NewSosPolynomial(
             gramian=gramian2,
             monomial_basis=(sym.Monomial(x[0]), sym.Monomial(x[1])),
             type=mp.MathematicalProgram.NonnegativePolynomial.kDsos)
         self.assertIsInstance(gramian2, np.ndarray)
 
-        poly3, gramian3 = prog.NewNonnegativePolynomial(
+        poly3, gramian3 = prog.NewSosPolynomial(
             monomial_basis=(sym.Monomial(x[0]), sym.Monomial(x[1])),
             type=mp.MathematicalProgram.NonnegativePolynomial.kSos)
+        self.assertIsInstance(poly3, sym.Polynomial)
+        self.assertIsInstance(gramian3, np.ndarray)
+
+    def test_nonnegative_polynomial(self):
+        # Only check if the API works.
+        prog = mp.MathematicalProgram()
+        x = prog.NewIndeterminates(3, "x")
+        with catch_drake_warnings(expected_count=1):
+            (poly1, gramian1) = prog.NewNonnegativePolynomial(
+                indeterminates=sym.Variables(x), degree=4,
+                type=mp.MathematicalProgram.NonnegativePolynomial.kSdsos)
+        self.assertIsInstance(poly1, sym.Polynomial)
+        self.assertIsInstance(gramian1, np.ndarray)
+
+        gramian2 = prog.NewSymmetricContinuousVariables(2)
+        with catch_drake_warnings(expected_count=1):
+            poly2 = prog.NewNonnegativePolynomial(
+                gramian=gramian2,
+                monomial_basis=(sym.Monomial(x[0]), sym.Monomial(x[1])),
+                type=mp.MathematicalProgram.NonnegativePolynomial.kDsos)
+        self.assertIsInstance(gramian2, np.ndarray)
+
+        with catch_drake_warnings(expected_count=1):
+            poly3, gramian3 = prog.NewNonnegativePolynomial(
+                monomial_basis=(sym.Monomial(x[0]), sym.Monomial(x[1])),
+                type=mp.MathematicalProgram.NonnegativePolynomial.kSos)
         self.assertIsInstance(poly3, sym.Polynomial)
         self.assertIsInstance(gramian3, np.ndarray)
 
@@ -599,6 +647,17 @@ class TestMathematicalProgram(unittest.TestCase):
             self.assertIsInstance(poly, sym.Polynomial)
             self.assertIsInstance(gram_odd, np.ndarray)
             self.assertIsInstance(gram_even, np.ndarray)
+
+    def test_add_sos_constraint(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewIndeterminates(1, "x")
+        Q = prog.AddSosConstraint(
+           p=sym.Polynomial(x[0]**2 + 1),
+           monomial_basis=[sym.Monomial(x[0])],
+           type=mp.MathematicalProgram.NonnegativePolynomial.kSdsos)
+        Q, m = prog.AddSosConstraint(
+            p=sym.Polynomial(x[0]**2 + 2),
+            type=mp.MathematicalProgram.NonnegativePolynomial.kSdsos)
 
     def test_sos(self):
         # Find a,b,c,d subject to
@@ -686,7 +745,26 @@ class TestMathematicalProgram(unittest.TestCase):
         for i in range(3):
             pt = pts[i, :]
             prog.AddLinearConstraint(pt.dot(X.dot(pt)) <= 1)
-        prog.AddMaximizeLogDeterminantSymmetricMatrixCost(X)
+        linear_cost, log_det_t, log_det_Z = \
+            prog.AddMaximizeLogDeterminantCost(X=X)
+        self.assertEqual(log_det_t.shape, (2,))
+        self.assertEqual(log_det_Z.shape, (2, 2))
+        result = mp.Solve(prog)
+        self.assertTrue(result.is_success())
+
+    def test_log_determinant_depreated(self):
+        # Find the minimal ellipsoid that covers some given points.
+        prog = mp.MathematicalProgram()
+        X = prog.NewSymmetricContinuousVariables(2)
+        pts = np.array([[1, 1], [1, -1], [-1, 1]])
+        for i in range(3):
+            pt = pts[i, :]
+            prog.AddLinearConstraint(pt.dot(X.dot(pt)) <= 1)
+        with catch_drake_warnings(expected_count=1):
+            linear_cost, log_det_t, log_det_Z = \
+                prog.AddMaximizeLogDeterminantSymmetricMatrixCost(X=X)
+        self.assertEqual(log_det_t.shape, (2,))
+        self.assertEqual(log_det_Z.shape, (2, 2))
         result = mp.Solve(prog)
         self.assertTrue(result.is_success())
 
@@ -699,9 +777,10 @@ class TestMathematicalProgram(unittest.TestCase):
         for i in range(3):
             pt = pts[i, :]
             prog.AddLinearConstraint(pt.dot(a * pt) <= 1)
-        prog.AddMaximizeGeometricMeanCost(a, 1)
+        cost = prog.AddMaximizeGeometricMeanCost(a, 1)
         result = mp.Solve(prog)
         self.assertTrue(result.is_success())
+        self.assertIsInstance(cost, mp.Binding[mp.LinearCost])
 
     def test_max_geometric_mean_trivial(self):
         # Solve the trivial problem.
@@ -981,6 +1060,24 @@ class TestMathematicalProgram(unittest.TestCase):
         result = mp.Solve(prog)
         self.assertAlmostEqual(result.GetSolution(x)[0], 1.)
 
+    def test_add_l2norm_cost(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewContinuousVariables(2, 'x')
+        prog.AddL2NormCost(
+            A=np.array([[1, 2.], [3., 4]]), b=np.array([1., 2.]), vars=x)
+        self.assertEqual(len(prog.l2norm_costs()), 1)
+
+    def test_add_l2norm_cost_using_conic_constraint(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewContinuousVariables(2, "x")
+        s, linear_cost, lorentz_cone_constraint = \
+            prog.AddL2NormCostUsingConicConstraint(
+                A=np.array([[1, 2.], [3., 4]]),
+                b=np.array([1., 2.]), vars=x)
+        self.assertEqual(len(prog.linear_costs()), 1)
+        self.assertEqual(len(prog.lorentz_cone_constraints()), 1)
+        self.assertEqual(prog.num_vars(), 3)
+
     def test_addcost_shared_ptr(self):
         # In particular, confirm that LinearCost ends up in linear_costs, etc.
         # as opposed to everything ending up as a generic_cost.
@@ -1000,13 +1097,12 @@ class TestMathematicalProgram(unittest.TestCase):
         self.assertIsInstance(binding.evaluator(), mp.QuadraticCost)
         self.assertEqual(len(prog.quadratic_costs()), 1)
 
-        # Confirm that I can add an L2NormCost. This is the only way to add an
-        # L2NormCost to a MathematicalProgram pending further progress on
-        # #15366.
+        # Confirm that I can add an L2NormCost.
         binding = prog.AddCost(mp.L2NormCost([[1.0]], [0.0]), x)
         self.assertIsInstance(binding, mp.Binding[mp.Cost])
         self.assertIsInstance(binding.evaluator(), mp.L2NormCost)
-        self.assertEqual(len(prog.generic_costs()), 1)
+        self.assertEqual(len(prog.generic_costs()), 0)
+        self.assertEqual(len(prog.l2norm_costs()), 1)
 
     def test_addconstraint_matrix(self):
         prog = mp.MathematicalProgram()
@@ -1102,6 +1198,9 @@ class TestMathematicalProgram(unittest.TestCase):
         self.assertEqual(
             constraint.eval_type(),
             mp.LorentzConeConstraint.EvalType.kConvexSmooth)
+        constraint.UpdateCoefficients(new_A=2 * A, new_b=3 * b)
+        np.testing.assert_array_equal(constraint.A().todense(), 2 * A)
+        np.testing.assert_array_equal(constraint.b(), 3 * b)
 
     def test_add_lorentz_cone_constraint(self):
         # Call AddLorentzConeConstraint, make sure no error is thrown.
@@ -1131,6 +1230,9 @@ class TestMathematicalProgram(unittest.TestCase):
         constraint = mp.RotatedLorentzConeConstraint(A=A, b=b)
         np.testing.assert_array_equal(constraint.A().todense(), A)
         np.testing.assert_array_equal(constraint.b(), b)
+        constraint.UpdateCoefficients(new_A=2 * A, new_b=3 * b)
+        np.testing.assert_array_equal(constraint.A().todense(), 2 * A)
+        np.testing.assert_array_equal(constraint.b(), 3 * b)
 
     def test_add_rotated_lorentz_cone_constraint(self):
         prog = mp.MathematicalProgram()
@@ -1351,7 +1453,9 @@ class TestMathematicalProgram(unittest.TestCase):
             mp.Cost,
             mp.LinearCost,
             mp.QuadraticCost,
+            mp.L1NormCost,
             mp.L2NormCost,
+            mp.LInfNormCost,
             mp.VisualizationCallback,
         ]
         for cls in cls_list:

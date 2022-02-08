@@ -12,10 +12,16 @@ for compatibility details.
 To learn about other installation methods, refer to
 [Installation and Quickstart](/installation.html).
 
+If you experience any problems or questions with Drake, please
+[ask for help on Stack Overflow](/getting_help.html).
+
 Drake binary releases incorporate a pre-compiled version of
 [SNOPT](https://ccom.ucsd.edu/~optimizers/solvers/snopt/) as part of the
 [Mathematical Program toolbox](https://drake.mit.edu/doxygen_cxx/group__solvers.html).
 Thanks to Philip E. Gill and Elizabeth Wong for their kind support.
+
+Drake's binary releases do not support the Mosek nor Gurobi solvers. To use
+Mosek or Gurobi, you will need to [build Drake from source](/from_source.html).
 
 ## Stable Releases
 
@@ -24,11 +30,11 @@ Mac are available to download as attachments from Drake's GitHub
 [releases](https://github.com/RobotLocomotion/drake/releases) page.
 
 The most recent release is
-[v0.35.0](https://github.com/RobotLocomotion/drake/releases/tag/v0.35.0):
+[v0.38.0](https://github.com/RobotLocomotion/drake/releases/tag/v0.38.0):
 
-* [https://github.com/RobotLocomotion/drake/releases/download/v0.35.0/drake-20211021-bionic.tar.gz](https://github.com/RobotLocomotion/drake/releases/download/v0.35.0/drake-20211021-bionic.tar.gz)
-* [https://github.com/RobotLocomotion/drake/releases/download/v0.35.0/drake-20211021-focal.tar.gz](https://github.com/RobotLocomotion/drake/releases/download/v0.35.0/drake-20211021-focal.tar.gz)
-* [https://github.com/RobotLocomotion/drake/releases/download/v0.35.0/drake-20211021-mac.tar.gz](https://github.com/RobotLocomotion/drake/releases/download/v0.35.0/drake-20211021-mac.tar.gz)
+* [https://github.com/RobotLocomotion/drake/releases/download/v0.38.0/drake-20220114-bionic.tar.gz](https://github.com/RobotLocomotion/drake/releases/download/v0.38.0/drake-20220114-bionic.tar.gz)
+* [https://github.com/RobotLocomotion/drake/releases/download/v0.38.0/drake-20220114-focal.tar.gz](https://github.com/RobotLocomotion/drake/releases/download/v0.38.0/drake-20220114-focal.tar.gz)
+* [https://github.com/RobotLocomotion/drake/releases/download/v0.38.0/drake-20220114-mac.tar.gz](https://github.com/RobotLocomotion/drake/releases/download/v0.38.0/drake-20220114-mac.tar.gz)
 
 ### Use as a C++ library
 

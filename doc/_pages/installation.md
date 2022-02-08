@@ -19,7 +19,7 @@ officially supports:
 | Ubuntu 18.04 LTS (Bionic Beaver) | x86_64 ⁽¹⁾   | 3.6 ⁽³⁾ |
 | Ubuntu 20.04 LTS (Focal Fossa)   | x86_64 ⁽¹⁾   | 3.8 ⁽³⁾ |
 | macOS Big Sur (11)               | x86_64 ⁽²⁾   | 3.9 ⁽³⁾ |
-| macOS Monterey (12) support is coming soon. |
+| macOS Monterey (12)              | x86_64 ⁽²⁾   | 3.9 ⁽³⁾ |
 
 ⁽¹⁾ Drake Ubuntu builds assume support for Intel's AVX2 and FMA instructions,
 introduced with the Haswell architecture in 2013 with substantial performance
@@ -28,7 +28,10 @@ improvements in the Broadwell architecture in 2014. Drake is compiled with
 machines). Drake can be used on older machines if necessary by building from
 source with that flag removed.
 
-⁽²⁾ Running Drake under Rosetta 2 emulation on arm64 is not supported. Plans
+⁽²⁾ For users running on Apple's newer arm64 hardware, refer to
+[Running under Rosetta 2](/rosetta2.html)
+for instructions on running using x86_64 emulation.
+Building and running directly on arm64 is not yet supported; plans
 for any future arm64 support on macOS and/or Ubuntu are discussed in
 [issue #13514](https://github.com/RobotLocomotion/drake/issues/13514).
 
@@ -38,7 +41,7 @@ for any future arm64 support on macOS and/or Ubuntu are discussed in
 require a working display server.  Most personal computers will have this
 already built in, but some cloud or docker environments may not.
 
-Additionally, if you compiling your own C++ code against Drake's C++ code
+Additionally, if you are compiling your own C++ code against Drake's C++ code
 and are using Drake's pre-compiled binaries, then you must use the same
 compiler as our releases:
 
@@ -47,7 +50,7 @@ compiler as our releases:
 | Ubuntu 18.04 LTS (Bionic Beaver) | GCC 7.5                        |
 | Ubuntu 20.04 LTS (Focal Fossa)   | GCC 9.3                        |
 | macOS Big Sur (11)               | Apple LLVM 12.0.0 (Xcode 12.4) |
-| macOS Monterey (12) support is coming soon. |
+| macOS Monterey (12)              | Apple LLVM 12.0.0 (Xcode 12.4) |
 
 ## Available Versions
 
@@ -72,17 +75,16 @@ All other packages support both C++ and/or Python.
 
 |                       | Ubuntu | macOS |
 |-----------------------|--------|-------|
-| Using pip             | [Stable](/pip.html#stable-releases) ⁽¹⁾ | |
+| Using pip             | [Stable](/pip.html#stable-releases) | |
 | Using apt (deb)       | [Stable](/apt.html#stable-releases) | |
 | Using tar.gz download | [Stable](/from_binary.html#stable-releases) or [Nightly](/from_binary.html#nightly-releases) | [Stable](/from_binary.html#stable-releases) or [Nightly](/from_binary.html#nightly-releases) |
 | Using Docker Hub      | [Stable](/docker.html#stable-releases) or [Nightly](/docker.html#nightly-releases) | [Stable](/docker.html#stable-releases) or [Nightly](/docker.html#nightly-releases) |
 
-⁽¹⁾ For the moment, we only support ``pip install drake`` for Ubuntu 18.04 LTS
-(Bionic Beaver), not Ubuntu 20.04 LTS (Focal Fossa).  Subscribe to
-[#15959](https://github.com/RobotLocomotion/drake/issues/15959) for updates.
-
 Alternatively, you can skip the pre-compiled binaries and
 [build Drake from source](/from_source.html).
+
+Drake's binary releases do not support the Mosek nor Gurobi solvers.
+To use Mosek or Gurobi, you must build Drake from source.
 
 We're considering adding macOS support for Homebrew, i.e., ``brew install
 drake``.  Please upvote or comment on

@@ -61,6 +61,7 @@ from pydrake.multibody.plant import (
     ContactResults_,
     ContactResultsToLcmSystem,
     ContactResultsToMeshcatParams,
+    ContactResultsToMeshcat,
     ContactResultsToMeshcat_,
     CoulombFriction_,
     ExternallyAppliedSpatialForce_,
@@ -85,8 +86,8 @@ from pydrake.geometry import (
     Box,
     GeometryId,
     GeometrySet,
+    HydroelasticContactRepresentation,
     Meshcat,
-    Rgba,
     Role,
     PenetrationAsPointPair_,
     ProximityProperties,
@@ -226,15 +227,6 @@ class TestPlant(unittest.TestCase):
         context = diagram.CreateDefaultContext()
         with self.assertRaises(RuntimeError):
             plant.EvalBodyPoseInWorld(context, body)
-
-    def test_deprecated_register_visual_geometry(self):
-        builder = DiagramBuilder_[float]()
-        plant, scene_graph = AddMultibodyPlantSceneGraph(builder, 0.0)
-        body = plant.AddRigidBody(name="B", M_BBo_B=SpatialInertia_[float]())
-        with catch_drake_warnings(expected_count=1):
-            plant.RegisterVisualGeometry(
-                body=body, X_BG=Isometry3(), shape=Box(1.0, 1.0, 1.0),
-                name="G", diffuse_color=[1., 0., 0., 0.])
 
     @numpy_compare.check_all_types
     def test_multibody_plant_api_via_parsing(self, T):
@@ -429,6 +421,12 @@ class TestPlant(unittest.TestCase):
             SpatialAcceleration_[T])
         # The test_multibody_dynamics already covers GetForceInWorld,
         # AddInForce, AddInForceInWorld.
+
+        # Also test these body api methods which require a finalized plant.
+        for i in range(7):
+            self.assertIsNotNone(dut.floating_position_suffix(i))
+        for i in range(6):
+            self.assertIsNotNone(dut.floating_velocity_suffix(i))
 
     def _test_joint_api(self, T, joint):
         Joint = Joint_[T]
@@ -942,17 +940,6 @@ class TestPlant(unittest.TestCase):
         base.SetCenterOfMassInBodyFrame(context=context, com=[0.0, 0.0, 0.0])
         M = SpatialInertia_[T](1, [0, 0, 0], UnitInertia_[T](1, 1, 1))
         base.SetSpatialInertiaInBodyFrame(context=context, M_Bo_B=M)
-
-    def test_deprecated_set_free_body_pose(self):
-        plant = MultibodyPlant_[float](0.0)
-        Parser(plant).AddModelFromFile(FindResourceOrThrow(
-            "drake/bindings/pydrake/multibody/test/double_pendulum.sdf"))
-        plant.Finalize()
-        with catch_drake_warnings(expected_count=1):
-            plant.SetFreeBodyPose(
-                context=plant.CreateDefaultContext(),
-                body=plant.GetBodyByName("base"),
-                X_WB=Isometry3())
 
     @numpy_compare.check_all_types
     def test_multibody_state_access(self, T):
@@ -1621,6 +1608,11 @@ class TestPlant(unittest.TestCase):
                     u_instance=np.array([0.2]), u=u)
                 numpy_compare.assert_float_equal(u, [0.2])
 
+            for p in range(joint.num_positions()):
+                self.assertIsNotNone(joint.position_suffix(p))
+            for v in range(joint.num_velocities()):
+                self.assertIsNotNone(joint.velocity_suffix(v))
+
             uniform_random = Variable(
                 name="uniform_random",
                 type=Variable.Type.RANDOM_UNIFORM)
@@ -1756,33 +1748,6 @@ class TestPlant(unittest.TestCase):
                 loop_body(make_joint, 0.001)
 
     @numpy_compare.check_all_types
-    def test_deprecated_weld_joint(self, T):
-        plant = MultibodyPlant_[T](0.0)
-        child = plant.AddRigidBody("Child", SpatialInertia_[float]())
-        with catch_drake_warnings(expected_count=1):
-            joint = WeldJoint_[T](
-                name="weld",
-                parent_frame_P=plant.world_frame(),
-                child_frame_C=child.body_frame(),
-                X_PC=Isometry3())
-        self.assertIsInstance(joint, Joint_[T])
-
-    def test_deprecated_weld_frames(self):
-        plant = MultibodyPlant_[float](0.0)
-        parser = Parser(plant)
-        iiwa_sdf_path = FindResourceOrThrow(
-            "drake/manipulation/models/"
-            "iiwa_description/sdf/iiwa14_no_collision.sdf")
-        iiwa_model = parser.AddModelFromFile(
-            file_name=iiwa_sdf_path, model_name="robot")
-        with catch_drake_warnings(expected_count=1):
-            weld = plant.WeldFrames(
-                A=plant.world_frame(),
-                B=plant.GetFrameByName("iiwa_link_0", iiwa_model),
-                X_AB=Isometry3())
-        self.assertIsInstance(weld, Joint_[float])
-
-    @numpy_compare.check_all_types
     def test_multibody_add_frame(self, T):
         MultibodyPlant = MultibodyPlant_[T]
         FixedOffsetFrame = FixedOffsetFrame_[T]
@@ -1807,15 +1772,6 @@ class TestPlant(unittest.TestCase):
         numpy_compare.assert_float_equal(
             frame.CalcPoseInBodyFrame(context).GetAsMatrix34(),
             numpy_compare.to_float(X_PF.GetAsMatrix34()))
-
-    @numpy_compare.check_all_types
-    def test_deprecated_fixed_offset_frame(self, T):
-        plant = MultibodyPlant_[T](0.0)
-        with catch_drake_warnings(expected_count=1):
-            frame = plant.AddFrame(frame=FixedOffsetFrame_[T](
-                name="frame", P=plant.world_frame(),
-                X_PF=Isometry3(), model_instance=None))
-        self.assertIsInstance(frame, Frame_[T])
 
     @numpy_compare.check_all_types
     def test_frame_context_methods(self, T):
@@ -2002,6 +1958,7 @@ class TestPlant(unittest.TestCase):
         # ContactResults
         contact_results = ContactResults()
         self.assertTrue(contact_results.num_point_pair_contacts() == 0)
+        self.assertIsNone(contact_results.plant())
         copy.copy(contact_results)
 
     def test_contact_model(self):
@@ -2017,6 +1974,21 @@ class TestPlant(unittest.TestCase):
         for model in models:
             plant.set_contact_model(model)
             self.assertEqual(plant.get_contact_model(), model)
+
+    def test_contact_surface_representation(self):
+        for time_step in [0.0, 0.1]:
+            plant = MultibodyPlant_[float](time_step)
+            self.assertEqual(
+                plant.get_contact_surface_representation(),
+                plant.GetDefaultContactSurfaceRepresentation(time_step))
+            reps = [
+                HydroelasticContactRepresentation.kTriangle,
+                HydroelasticContactRepresentation.kPolygon,
+            ]
+            for rep in reps:
+                plant.set_contact_surface_representation(rep)
+                self.assertEqual(
+                    plant.get_contact_surface_representation(), rep)
 
     def test_contact_results_to_lcm(self):
         # ContactResultsToLcmSystem
@@ -2054,15 +2026,13 @@ class TestPlant(unittest.TestCase):
             0)
         # Check all valid combinations of the optional arguments.
         for optional_args in itertools.product(
-                [{}, {"scene_graph": scene_graph}],
                 [{}, {"lcm": None}, {"lcm": DrakeLcm()}],
                 [{}, {"publish_period": None}, {"publish_period": 1.0/32}]):
             kwargs = collections.ChainMap(*optional_args)
             with self.subTest(num_optional_args=len(kwargs), **kwargs):
-                is_deprecated = 0 if "scene_graph" in kwargs else 1
-                with catch_drake_warnings(expected_count=is_deprecated) as w:
-                    publisher = ConnectContactResultsToDrakeVisualizer(
-                        builder=builder, plant=plant, **kwargs)
+                publisher = ConnectContactResultsToDrakeVisualizer(
+                    builder=builder, plant=plant, scene_graph=scene_graph,
+                    **kwargs)
                 self.assertIsInstance(publisher, LcmPublisherSystem)
 
     def test_collision_filter(self):
@@ -2193,8 +2163,17 @@ class TestPlant(unittest.TestCase):
         self.assertEqual(prop2.num_propellers(), 2)
 
     def test_hydroelastic_contact_results(self):
+        time_steps = [
+            0.0,  # Continuous mode.
+            0.01,  # Discrete mode.
+        ]
+        for time_step in time_steps:
+            with self.subTest(time_step=time_step):
+                self._check_hydroelastic_contact_results(time_step)
+
+    def _check_hydroelastic_contact_results(self, time_step):
         builder = DiagramBuilder_[float]()
-        plant, scene_graph = AddMultibodyPlantSceneGraph(builder, 0.0)
+        plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step)
         Parser(plant).AddModelFromFile(
             FindResourceOrThrow(
                 "drake/bindings/pydrake/multibody/test/hydroelastic.sdf"))
@@ -2214,36 +2193,73 @@ class TestPlant(unittest.TestCase):
 
         self.assertEqual(contact_results.num_hydroelastic_contacts(), 1)
         contact_info = contact_results.hydroelastic_contact_info(0)
-        contact_info.contact_surface().id_M()
-        contact_info.contact_surface().id_N()
-        contact_info.contact_surface().mesh_W().centroid()
+        self._sanity_check_contact_surface(contact_info.contact_surface())
         contact_info.F_Ac_W().get_coeffs()
 
-    @numpy_compare.check_nonsymbolic_types
-    def test_contact_results_to_meshcat(self, T):
-        meshcat = Meshcat()
-        params = ContactResultsToMeshcatParams()
-        params.publish_period = 0.123
-        params.default_color = Rgba(0.5, 0.5, 0.5)
-        params.prefix = "py_visualizer"
-        params.delete_on_initialization_event = False
-        params.force_threshold = 0.2
-        params.newtons_per_meter = 5
-        params.radius = 0.1
-        self.assertNotIn("object at 0x", repr(params))
-        params2 = ContactResultsToMeshcatParams(publish_period=0.4)
-        self.assertEqual(params2.publish_period, 0.4)
-        vis = ContactResultsToMeshcat_[T](meshcat=meshcat, params=params)
-        vis.Delete()
-        self.assertIsInstance(vis.contact_results_input_port(), InputPort_[T])
+    def _sanity_check_contact_surface(self, dut):
+        dut.id_M()
+        dut.id_N()
+        dut.num_faces()
+        dut.num_vertices()
+        dut.area(face_index=0)
+        dut.total_area()
+        dut.face_normal(face_index=0)
+        dut.centroid(face_index=0)
+        dut.centroid()
+        dut.is_triangle()
+        dut.representation()
+        if dut.is_triangle():
+            dut.tri_mesh_W().centroid()
+        else:
+            dut.poly_mesh_W().centroid()
+        if dut.HasGradE_M():
+            dut.EvaluateGradE_M_W(index=0)
+        if dut.HasGradE_N():
+            dut.EvaluateGradE_N_W(index=0)
+        dut.Equal(surface=dut)
+        copy.copy(dut)
 
+    def test_deprecated_contact_results_to_meshcat_default_scalar(self):
+        """Checks ContactResultsToMeshcat for deprecation."""
+        meshcat = Meshcat()
+        with catch_drake_warnings(expected_count=1):
+            params = ContactResultsToMeshcatParams()
+        self.assertIsNotNone(params)
+        with catch_drake_warnings(expected_count=1):
+            vis = ContactResultsToMeshcat(meshcat=meshcat, params=params)
+        vis.Delete()
+        builder = DiagramBuilder_[float]()
+        plant, scene_graph = AddMultibodyPlantSceneGraph(builder, 0.01)
+        plant.Finalize()
+        with catch_drake_warnings(expected_count=1):
+            ContactResultsToMeshcat.AddToBuilder(
+                builder=builder, plant=plant, meshcat=meshcat, params=params)
+
+    @numpy_compare.check_nonsymbolic_types
+    def test_deprecated_contact_results_to_meshcat_specific_scalar(self, T):
+        """Checks ContactResultsToMeshcat_[T] for deprecation."""
+        meshcat = Meshcat()
+        with catch_drake_warnings(expected_count=1):
+            params = ContactResultsToMeshcatParams()
+        self.assertIsNotNone(params)
+        with catch_drake_warnings(expected_count=1):
+            vis = ContactResultsToMeshcat_[T](meshcat=meshcat, params=params)
+        vis.Delete()
         builder = DiagramBuilder_[T]()
         plant, scene_graph = AddMultibodyPlantSceneGraph(builder, 0.01)
         plant.Finalize()
-        ContactResultsToMeshcat_[T].AddToBuilder(
-            builder=builder, plant=plant, meshcat=meshcat, params=params)
-        ContactResultsToMeshcat_[T].AddToBuilder(
-            builder=builder,
-            contact_results_port=plant.get_contact_results_output_port(),
-            meshcat=meshcat,
-            params=params)
+        with catch_drake_warnings(expected_count=1):
+            ContactResultsToMeshcat_[T].AddToBuilder(
+                builder=builder, plant=plant, meshcat=meshcat, params=params)
+
+    def test_free_base_bodies(self):
+        plant = MultibodyPlant_[float](time_step=0.01)
+        model_instance = plant.AddModelInstance("new instance")
+        added_body = plant.AddRigidBody(
+            name="body", model_instance=model_instance,
+            M_BBo_B=SpatialInertia_[float]())
+        plant.Finalize()
+        self.assertTrue(plant.HasBodyNamed("body", model_instance))
+        self.assertTrue(plant.HasUniqueFreeBaseBody(model_instance))
+        body = plant.GetUniqueFreeBaseBodyOrThrow(model_instance)
+        self.assertEqual(body.index(), added_body.index())

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "drake/geometry/optimization/convex_set.h"
+#include "drake/geometry/optimization/hpolyhedron.h"
 
 namespace drake {
 namespace geometry {
@@ -28,10 +29,18 @@ class VPolytope final : public ConvexSet {
 
   /** Constructs the polytope from a d-by-n matrix, where d is the ambient
   dimension, and n is the number of vertices.  The vertices do not have to be
-  ordered, nor minimal (they can contain points inside their convex hull).  */
+  ordered, nor minimal (they can contain points inside their convex hull).
+  @pydrake_mkdoc_identifier{vertices} */
   explicit VPolytope(const Eigen::Ref<const Eigen::MatrixXd>& vertices);
 
-  /** Construct the polytope from a SceneGraph geometry. */
+  /** Constructs the polytope from a bounded polyhedron (using Qhull).
+  @throws std::runtime_error if H is unbounded or if Qhull terminates with an
+  error.
+  @pydrake_mkdoc_identifier{hpolyhedron} */
+  explicit VPolytope(const HPolyhedron& H);
+
+  /** Constructs the polytope from a SceneGraph geometry.
+  @pydrake_mkdoc_identifier{scenegraph} */
   VPolytope(const QueryObject<double>& query_object, GeometryId geometry_id,
             std::optional<FrameId> reference_frame = std::nullopt);
 
@@ -57,6 +66,12 @@ class VPolytope final : public ConvexSet {
   This is an axis-aligned box, centered at the origin, with edge length 2. */
   static VPolytope MakeUnitBox(int dim);
 
+  /**
+   * Computes the volume of this V-Polytope.
+   * @note this function calls qhull to compute the volume.
+   */
+  [[nodiscard]] double CalcVolume() const;
+
  private:
   bool DoIsBounded() const { return true; }
 
@@ -79,9 +94,7 @@ class VPolytope final : public ConvexSet {
   // Implement support shapes for the ShapeReifier interface.
   using ShapeReifier::ImplementGeometry;
   void ImplementGeometry(const Box& box, void* data) final;
-  // TODO(russt): Support ImplementGeometry(const Convex& convex, ...), but
-  // currently it would require e.g. digging ReadObjForConvex out of
-  // proximity_engine.cc.
+  void ImplementGeometry(const Convex& convex, void* data) final;
 
   Eigen::MatrixXd vertices_;
 };
