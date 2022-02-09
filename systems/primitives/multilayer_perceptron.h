@@ -84,8 +84,12 @@ class MultilayerPerceptron final : public LeafSystem<T> {
   explicit MultilayerPerceptron(const MultilayerPerceptron<U>&);
 
   /** Sets all of the parameters (all weights and biases) in the `parameters`
-   from a zero-mean, 0.01*unit-covariance Gaussian distribution. This is
-   typically called via System<T>::SetRandomContext. By contrast,
+   using the "LeCun initialization": a uniform distribution with mean zero and
+   standard deviation √(1/m), where m is the number of connections feeding into
+   the corresponding node. See eq. (16) in
+   http://yann.lecun.com/exdb/publis/pdf/lecun-98b.pdf .
+
+   This is typically called via System<T>::SetRandomContext. By contrast,
    System<T>::SetDefaultContext will set all weights and biases to zero. */
   void SetRandomParameters(const Context<T>& context, Parameters<T>* parameters,
                            RandomGenerator* generator) const override;
@@ -107,6 +111,11 @@ class MultilayerPerceptron final : public LeafSystem<T> {
   /** Returns a reference to all of the parameters (weights and biases) as a
    single vector. Use GetWeights and GetBiases to extract the components. */
   const VectorX<T>& GetParameters(const Context<T>& context) const;
+
+  /** Returns a mutable reference to all of the parameters (weights and biases)
+   as a single vector. */
+  Eigen::VectorBlock<VectorX<T>> GetMutableParameters(
+      Context<T>* context) const;
 
   /** Sets all of the parameters in the network (weights and biases) using a
    single vector. Use SetWeights and SetBiases to extract the components. */
