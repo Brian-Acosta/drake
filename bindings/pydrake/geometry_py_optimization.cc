@@ -11,6 +11,7 @@
 #include "drake/geometry/optimization/graph_of_convex_sets.h"
 #include "drake/geometry/optimization/hpolyhedron.h"
 #include "drake/geometry/optimization/hyperellipsoid.h"
+#include "drake/geometry/optimization/intersection.h"
 #include "drake/geometry/optimization/iris.h"
 #include "drake/geometry/optimization/minkowski_sum.h"
 #include "drake/geometry/optimization/point.h"
@@ -48,9 +49,27 @@ void DefineGeometryOptimization(py::module m) {
             py::arg("prog"), py::arg("vars"),
             cls_doc.AddPointInSetConstraints.doc)
         .def("AddPointInNonnegativeScalingConstraints",
-            &ConvexSet::AddPointInNonnegativeScalingConstraints,
+            overload_cast_explicit<
+                std::vector<solvers::Binding<solvers::Constraint>>,
+                solvers::MathematicalProgram*,
+                const Eigen::Ref<const solvers::VectorXDecisionVariable>&,
+                const symbolic::Variable&>(
+                &ConvexSet::AddPointInNonnegativeScalingConstraints),
             py::arg("prog"), py::arg("x"), py::arg("t"),
-            cls_doc.AddPointInNonnegativeScalingConstraints.doc)
+            cls_doc.AddPointInNonnegativeScalingConstraints.doc_3args)
+        .def("AddPointInNonnegativeScalingConstraints",
+            overload_cast_explicit<
+                std::vector<solvers::Binding<solvers::Constraint>>,
+                solvers::MathematicalProgram*,
+                const Eigen::Ref<const Eigen::MatrixXd>&,
+                const Eigen::Ref<const Eigen::VectorXd>&,
+                const Eigen::Ref<const Eigen::VectorXd>&, double,
+                const Eigen::Ref<const solvers::VectorXDecisionVariable>&,
+                const Eigen::Ref<const solvers::VectorXDecisionVariable>&>(
+                &ConvexSet::AddPointInNonnegativeScalingConstraints),
+            py::arg("prog"), py::arg("A"), py::arg("b"), py::arg("c"),
+            py::arg("d"), py::arg("x"), py::arg("t"),
+            cls_doc.AddPointInNonnegativeScalingConstraints.doc_7args)
         .def("ToShapeWithPose", &ConvexSet::ToShapeWithPose,
             cls_doc.ToShapeWithPose.doc);
     // Note: We use the copyable_unique_ptr constructor which calls Clone() on
@@ -109,10 +128,19 @@ void DefineGeometryOptimization(py::module m) {
             py::arg("other"), cls_doc.CartesianProduct.doc)
         .def("CartesianPower", &HPolyhedron::CartesianPower, py::arg("n"),
             cls_doc.CartesianPower.doc)
+        .def("Intersection", &HPolyhedron::Intersection, py::arg("other"),
+            cls_doc.Intersection.doc)
         .def_static("MakeBox", &HPolyhedron::MakeBox, py::arg("lb"),
             py::arg("ub"), cls_doc.MakeBox.doc)
         .def_static("MakeUnitBox", &HPolyhedron::MakeUnitBox, py::arg("dim"),
-            cls_doc.MakeUnitBox.doc);
+            cls_doc.MakeUnitBox.doc)
+        .def(py::pickle(
+            [](const HPolyhedron& self) {
+              return std::make_pair(self.A(), self.b());
+            },
+            [](std::pair<Eigen::MatrixXd, Eigen::VectorXd> args) {
+              return HPolyhedron(std::get<0>(args), std::get<1>(args));
+            }));
     py::implicitly_convertible<HPolyhedron, copyable_unique_ptr<ConvexSet>>();
   }
 
@@ -138,9 +166,31 @@ void DefineGeometryOptimization(py::module m) {
         .def_static("MakeHypersphere", &Hyperellipsoid::MakeHypersphere,
             py::arg("radius"), py::arg("center"), cls_doc.MakeHypersphere.doc)
         .def_static("MakeUnitBall", &Hyperellipsoid::MakeUnitBall,
-            py::arg("dim"), cls_doc.MakeUnitBall.doc);
+            py::arg("dim"), cls_doc.MakeUnitBall.doc)
+        .def(py::pickle(
+            [](const Hyperellipsoid& self) {
+              return std::make_pair(self.A(), self.center());
+            },
+            [](std::pair<Eigen::MatrixXd, Eigen::VectorXd> args) {
+              return Hyperellipsoid(std::get<0>(args), std::get<1>(args));
+            }));
     py::implicitly_convertible<Hyperellipsoid,
         copyable_unique_ptr<ConvexSet>>();
+  }
+
+  // Intersection
+  {
+    const auto& cls_doc = doc.Intersection;
+    py::class_<Intersection, ConvexSet>(m, "Intersection", cls_doc.doc)
+        .def(py::init<const ConvexSets&>(), py::arg("sets"),
+            cls_doc.ctor.doc_1args)
+        .def(py::init<const ConvexSet&, const ConvexSet&>(), py::arg("setA"),
+            py::arg("setB"), cls_doc.ctor.doc_2args)
+        .def("num_elements", &Intersection::num_elements,
+            cls_doc.num_elements.doc)
+        .def("element", &Intersection::element, py_rvp::reference_internal,
+            py::arg("index"), cls_doc.element.doc);
+    py::implicitly_convertible<Intersection, copyable_unique_ptr<ConvexSet>>();
   }
 
   // MinkowskiSum
@@ -173,7 +223,9 @@ void DefineGeometryOptimization(py::module m) {
             py::arg("reference_frame") = std::nullopt,
             py::arg("maximum_allowable_radius") = 0.0, cls_doc.ctor.doc_4args)
         .def("x", &Point::x, cls_doc.x.doc)
-        .def("set_x", &Point::set_x, py::arg("x"), cls_doc.set_x.doc);
+        .def("set_x", &Point::set_x, py::arg("x"), cls_doc.set_x.doc)
+        .def(py::pickle([](const Point& self) { return self.x(); },
+            [](Eigen::VectorXd arg) { return Point(arg); }));
     py::implicitly_convertible<Point, copyable_unique_ptr<ConvexSet>>();
   }
 
@@ -195,7 +247,9 @@ void DefineGeometryOptimization(py::module m) {
             py::arg("ub"), cls_doc.MakeBox.doc)
         .def_static("MakeUnitBox", &VPolytope::MakeUnitBox, py::arg("dim"),
             cls_doc.MakeUnitBox.doc)
-        .def("CalcVolume", &VPolytope::CalcVolume, cls_doc.CalcVolume.doc);
+        .def("CalcVolume", &VPolytope::CalcVolume, cls_doc.CalcVolume.doc)
+        .def(py::pickle([](const VPolytope& self) { return self.vertices(); },
+            [](Eigen::MatrixXd arg) { return VPolytope(arg); }));
     py::implicitly_convertible<VPolytope, copyable_unique_ptr<ConvexSet>>();
   }
 
@@ -333,17 +387,25 @@ void DefineGeometryOptimization(py::module m) {
             .def("SolveShortestPath",
                 overload_cast_explicit<solvers::MathematicalProgramResult,
                     GraphOfConvexSets::VertexId, GraphOfConvexSets::VertexId,
-                    bool>(&GraphOfConvexSets::SolveShortestPath),
+                    bool, const solvers::SolverInterface*,
+                    const std::optional<solvers::SolverOptions>&>(
+                    &GraphOfConvexSets::SolveShortestPath),
                 py::arg("source_id"), py::arg("target_id"),
                 py::arg("convex_relaxation") = false,
+                py::arg("solver") = nullptr,
+                py::arg("solver_options") = std::nullopt,
                 cls_doc.SolveShortestPath.doc_by_id)
             .def("SolveShortestPath",
                 overload_cast_explicit<solvers::MathematicalProgramResult,
                     const GraphOfConvexSets::Vertex&,
-                    const GraphOfConvexSets::Vertex&, bool>(
+                    const GraphOfConvexSets::Vertex&, bool,
+                    const solvers::SolverInterface*,
+                    const std::optional<solvers::SolverOptions>&>(
                     &GraphOfConvexSets::SolveShortestPath),
                 py::arg("source"), py::arg("target"),
                 py::arg("convex_relaxation") = false,
+                py::arg("solver") = nullptr,
+                py::arg("solver_options") = std::nullopt,
                 cls_doc.SolveShortestPath.doc_by_reference);
 
     BindIdentifier<GraphOfConvexSets::VertexId>(
