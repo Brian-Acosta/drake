@@ -1,12 +1,20 @@
 #pragma once
 
 #include <string>
+#include <iostream>
+#include <fstream>
 
 #include "drake/common/drake_copyable.h"
 #include "drake/solvers/solver_base.h"
 
 namespace drake {
 namespace solvers {
+
+const static Eigen::IOFormat CSVFormat(Eigen::StreamPrecision,
+                                       Eigen::DontAlignCols, ", ", "\n");
+
+void writeCSV(const std::string& path, const Eigen::MatrixXd& M);
+
 /**
  * The OSQP solver details after calling Solve() function. The user can call
  * MathematicalProgramResult::get_solver_details<OsqpSolver>() to obtain the
@@ -62,6 +70,8 @@ class OsqpSolver final : public SolverBase {
  private:
   void DoSolve(const MathematicalProgram&, const Eigen::VectorXd&,
                const SolverOptions&, MathematicalProgramResult*) const final;
+  const std::string save_path_ = "/home/brian/workspace/logs/osqp_solver/";
+  bool osqp_debug_ = true;
 };
 }  // namespace solvers
 }  // namespace drake
