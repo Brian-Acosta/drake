@@ -13,6 +13,7 @@ from pydrake.test.algebra_test_util import ScalarAlgebra, VectorizedAlgebra
 from pydrake.common.containers import EqualToDict
 from pydrake.common.deprecation import install_numpy_warning_filters
 from pydrake.common.test_utilities import numpy_compare
+from pydrake.common.test_utilities.deprecation import catch_drake_warnings
 
 # TODO(eric.cousineau): Replace usages of `sym` math functions with the
 # overloads from `pydrake.math`.
@@ -1157,6 +1158,12 @@ class TestSymbolicMonomial(unittest.TestCase):
         self.assertEqual(m.Evaluate(env=env),
                          env[x] ** 3 * env[y])
 
+    def test_evaluate_batch(self):
+        m = sym.Monomial(x, 3) * sym.Monomial(y)
+        monomial_vals = m.Evaluate(
+            vars=[x, y], vars_values=[[1, 2, 3], [4, 5, 6]])
+        np.testing.assert_array_equal(monomial_vals, [4, 8 * 5, 27 * 6])
+
     def test_evaluate_exception_np_nan(self):
         m = sym.Monomial(x, 3)
         env = {x: np.nan}
@@ -1278,6 +1285,19 @@ class TestSymbolicPolynomial(unittest.TestCase):
         p.AddProduct(coeff=sym.Expression(3), m=m)  # p += 3 * x
         numpy_compare.assert_equal(p.ToExpression(), 6 * x)
 
+    def test_expand(self):
+        a = sym.Variable("a")
+        x = sym.Variable("x")
+
+        p = sym.Polynomial({
+            sym.Monomial(): a ** 2 - 1 - (a+1) * (a-1),
+            sym.Monomial(x): a + 2})
+        p_expand = p.Expand()
+        self.assertEqual(len(p_expand.monomial_to_coefficient_map()), 1)
+        self.assertTrue(
+            p_expand.monomial_to_coefficient_map()[
+                sym.Monomial(x)].EqualTo(a+2))
+
     def test_remove_terms_with_small_coefficients(self):
         e = 3 * x + 1e-12 * y
         p = sym.Polynomial(e, [x, y])
@@ -1287,6 +1307,11 @@ class TestSymbolicPolynomial(unittest.TestCase):
         p = sym.Polynomial(e, [x, y])
         q = p.RemoveTermsWithSmallCoefficients(coefficient_tol=1e-6)
         numpy_compare.assert_equal(q.ToExpression(), 3 * x)
+
+    def test_even_odd(self):
+        p = sym.Polynomial()
+        self.assertTrue(p.IsEven())
+        self.assertTrue(p.IsOdd())
 
     def test_comparison(self):
         p = sym.Polynomial()
@@ -1306,6 +1331,15 @@ class TestSymbolicPolynomial(unittest.TestCase):
         self.assertFalse(
             p.CoefficientsAlmostEqual(
                 p=(p + sym.Polynomial(2e-6 * x)), tolerance=1e-6))
+
+        a = sym.Variable("a")
+        p_not_expand = sym.Polynomial(
+            {sym.Monomial(): a ** 2 - 1 - (a-1) * (a+1)})
+        p_expand = sym.Polynomial({sym.Monomial(): 0})
+        # TODO(2022-09-01) Remove with completion of deprecation.
+        with catch_drake_warnings(expected_count=1):
+            self.assertTrue(p_not_expand.EqualToAfterExpansion(p_expand))
+        self.assertFalse(p_not_expand.EqualTo(p_expand))
 
     def test_repr(self):
         p = sym.Polynomial()
@@ -1518,6 +1552,12 @@ class TestSymbolicPolynomial(unittest.TestCase):
             p.EvaluatePartial(var=a, c=2),
             sym.Polynomial(2 * x * x + b * x + c, [x]))
 
+    def test_evaluate_indeterminates(self):
+        p = sym.Polynomial(2 * x * x, [x])
+        p_values = p.EvaluateIndeterminates(
+            indeterminates=[x], indeterminates_values=[[1, 2, 3]])
+        self.assertEqual(p_values.shape, ((3,)))
+
 
 class TestExtractVariablesFromExpression(unittest.TestCase):
     def test(self):
@@ -1530,6 +1570,10 @@ class TestExtractVariablesFromExpression(unittest.TestCase):
         self.assertEqual(len(map_var_to_index), 2)
         for i in range(2):
             self.assertEqual(map_var_to_index[variables[i].get_id()], i)
+
+        variables, map_var_to_index = sym.ExtractVariablesFromExpression(
+            expressions=np.array([x + x * y, y+1]))
+        self.assertEqual(variables.shape, (2,))
 
 
 class TestDecomposeAffineExpression(unittest.TestCase):

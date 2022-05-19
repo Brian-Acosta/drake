@@ -6,7 +6,7 @@ import socket
 import subprocess
 import sys
 
-from pydrake.common import FindResourceOrThrow, set_log_level
+from pydrake.common import FindResourceOrThrow
 
 
 def _is_listening(port):
@@ -58,56 +58,24 @@ def _start_meshcat_deepnote(*, params=None, restart_nginx=False):
 
 def StartMeshcat():
     """
-    Constructs a Meshcat instance, with support for Deepnote and Google Colab.
+    Constructs a Meshcat instance, with extra support for Deepnote.
 
-    On most platforms, this method is equivalent to calling `meshcat =
-    Meshcat()`. On Deepnote or Google Colab, this provides extra functionality,
-    setting Meshcat to use the appropriate ports and to use ngrok if necessary.
+    On most platforms, this function is equivalent to simply constructing a
+    ``pydrake.geometry.Meshcat`` object with default arguments.
 
-    Note that the free/unregistered version of ngrok only allows two
-    connections. On Google Colab, this means one can only have two viable
-    Meshcat instances running per provisioned machine. On Deepnote, we have one
-    additional port available (port 8080) which does not require ngrok; you
-    must "Allow incoming connections" in the environment settings to use it.
-
-    If you run out of available ports, you can reset the notebook to free any
-    ports that are currently used by the notebook.
-
-    Warning:
-     Drake's support for Colab is deprecated.
-     New releases after 2022-04-01 will no longer be compatible with Colab.
-     See `drake#13391 <https://github.com/RobotLocomotion/drake/issues/13391>`_
-     or `colab#1880 <https://github.com/googlecolab/colabtools/issues/1880>`_
-     for details.
+    On Deepnote, however, this does extra work to expose Meshcat to the public
+    internet by setting up a reverse proxy for the single available network
+    port. To access it, you must enable "Allow incoming connections" in the
+    Environment settings pane.
     """
-    prev_log_level = set_log_level("warn")
-    use_ngrok = False
-    if ("DEEPNOTE_PROJECT_ID" in os.environ):
-        # Deepnote exposes port 8080 (only).  If we need multiple meshcats,
-        # then we fall back to ngrok.
-        # TODO(jwnimmer-tri) Use _start_meshcat_deepnote() instead of ngrok,
-        # once we have a bit more experience with it.
-        try:
-            meshcat = Meshcat(8080)
-        except RuntimeError:
-            use_ngrok = True
-        else:
-            set_log_level(prev_log_level)
-            web_url = f"https://{os.environ['DEEPNOTE_PROJECT_ID']}.deepnoteproject.com"  # noqa
-            print(f'Meshcat is now available at {web_url}')
-            return meshcat
+    if "DEEPNOTE_PROJECT_ID" in os.environ:
+        return _start_meshcat_deepnote()
+    return Meshcat()
 
-    if 'google.colab' in sys.modules:
-        use_ngrok = True
 
-    meshcat = Meshcat()
-    web_url = meshcat.web_url()
-    if use_ngrok:
-        from pyngrok import ngrok
-        http_tunnel = ngrok.connect(meshcat.port(), bind_tls=False)
-        web_url = http_tunnel.public_url
-
-    set_log_level(prev_log_level)
-    print(f'Meshcat is now available at {web_url}')
-
-    return meshcat
+# TODO(jwnimmer-tri) Deprecate these legacy compatibility aliases on or after
+# 2022-07-01.
+MeshcatVisualizerCpp = MeshcatVisualizer
+MeshcatVisualizerCpp_ = MeshcatVisualizer_
+MeshcatPointCloudVisualizerCpp = MeshcatPointCloudVisualizer
+MeshcatPointCloudVisualizerCpp_ = MeshcatPointCloudVisualizer_

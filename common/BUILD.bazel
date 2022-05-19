@@ -365,24 +365,20 @@ drake_cc_library(
     name = "drake_marker_shared_library",
     srcs = ["libdrake_marker.so"],
     hdrs = ["drake_marker.h"],
+    install_hdrs_exclude = ["drake_marker.h"],
     tags = ["exclude_from_package"],
     visibility = ["//tools/install/libdrake:__pkg__"],
 )
 
 # The drake::filesystem support is intended ONLY for use within Drake's *.cc
 # files -- it is not a public dependency of Drake.  As such, we compile it with
-# hidden visibility, exclude its header file from the install, and exclude it
-# from the //common:common package_library shortcut.
+# hidden visibility and mark it internal.
 drake_cc_library(
     name = "filesystem",
     srcs = ["filesystem.cc"],
     hdrs = ["filesystem.h"],
     copts = ["-fvisibility=hidden"],
-    install_hdrs_exclude = ["filesystem.h"],
-    tags = [
-        "exclude_from_libdrake",
-        "exclude_from_package",
-    ],
+    internal = True,
     visibility = ["//:__subpackages__"],
     deps = [
         "@ghc_filesystem",
@@ -393,6 +389,7 @@ drake_cc_library(
     name = "find_runfiles",
     srcs = ["find_runfiles.cc"],
     hdrs = ["find_runfiles.h"],
+    interface_deps = [],
     deps = [
         ":essential",
         ":filesystem",
@@ -418,9 +415,11 @@ drake_cc_library(
         "//tools/cc_toolchain:linux": ["-ldl"],
         "//conditions:default": [],
     }),
+    interface_deps = [
+        ":essential",
+    ],
     deps = [
         ":drake_marker_shared_library",
-        ":essential",
         ":filesystem",
         ":find_runfiles",
     ],
@@ -434,8 +433,8 @@ drake_cc_library(
         DRAKE_RESOURCE_SENTINEL,
     ],
     visibility = ["//tools/install/libdrake:__pkg__"],
+    interface_deps = [],
     deps = [
-        ":essential",
         ":filesystem",
         ":find_resource",
     ],
@@ -478,8 +477,10 @@ drake_cc_library(
     hdrs = [
         "nice_type_name.h",
     ],
-    deps = [
+    interface_deps = [
         ":essential",
+    ],
+    deps = [
         ":nice_type_name_override_header",
     ],
 )
@@ -499,11 +500,13 @@ drake_cc_library(
     name = "random",
     srcs = ["random.cc"],
     hdrs = ["random.h"],
-    deps = [
-        ":autodiff",
+    interface_deps = [
         ":copyable_unique_ptr",
         ":essential",
         ":extract_double",
+    ],
+    deps = [
+        ":autodiff",
     ],
 )
 
@@ -530,8 +533,10 @@ drake_cc_library(
     name = "temp_directory",
     srcs = ["temp_directory.cc"],
     hdrs = ["temp_directory.h"],
-    deps = [
+    interface_deps = [
         ":essential",
+    ],
+    deps = [
         ":filesystem",
     ],
 )
@@ -709,6 +714,7 @@ drake_cc_googletest(
 drake_cc_googletest(
     name = "random_test",
     deps = [
+        ":autodiff",
         ":random",
         "//common/test_utilities:limit_malloc",
     ],
@@ -942,6 +948,7 @@ drake_cc_googletest(
     ],
     deps = [
         ":drake_path",
+        ":filesystem",
         ":find_resource",
         "//common/test_utilities:expect_no_throw",
     ],
@@ -975,6 +982,7 @@ drake_cc_googletest(
         "test/find_resource_test_data.txt",
     ],
     deps = [
+        ":filesystem",
         ":find_runfiles",
         ":temp_directory",
         "//common/test_utilities:expect_throws_message",
@@ -1088,6 +1096,22 @@ drake_cc_googletest(
         ":autodiff",
         ":essential",
         ":nice_type_name",
+        ":nice_type_name_override_header",
+    ],
+)
+
+drake_cc_googletest(
+    name = "openmp_test",
+    # TODO(jwnimmer-tri) Encapsulate unit test concurrency configuration into
+    # Drake's starlark macros, so that we don't have to repeat ourselves here.
+    env = {
+        "OMP_NUM_THREADS": "2",
+    },
+    tags = [
+        "cpu:2",
+    ],
+    deps = [
+        "//common:essential",
     ],
 )
 
@@ -1281,6 +1305,7 @@ drake_cc_googletest(
     deps = [
         ":symbolic",
         "//common/test_utilities:expect_no_throw",
+        "//common/test_utilities:expect_throws_message",
         "//common/test_utilities:symbolic_test_util",
     ],
 )

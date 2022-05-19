@@ -149,6 +149,7 @@ each of the properties and then discuss how they can be specified.
        - Ellipsoid
          - The representative circle is an abstract circle whose radius is that
            of the largest semi-axis of the elllipsoid.
+     - Resolution hint has no effect on Box.
 - Hydroelastic modulus (Pa (N/m²))
   - This is the measure of how stiff the material is. It directly defines how
     much pressure is exerted given a certain amount of penetration. More
@@ -400,7 +401,6 @@ Here are various ways that hydroelastic contact may surprise you.
 - Half spaces are not represented by meshes. They don’t contribute *any*
   geometry to the resultant contact surface. The contact surface’s refinement
   will depend on the other geometry’s level of refinement.
-- Resolution hint (`drake:mesh_resolution_hint`) has no effect on Box.
 
 @subsubsection hug_tips Tips and Tricks
 
@@ -591,6 +591,7 @@ indicate what can and cannot be done with hydroelastic contact.
   includes arbitrary meshes defined as OBJs).
 - Drake primitive Shape types (Box, Capsule, Cylinder, Ellipsoid, HalfSpace,
   and Cylinder) can all be used to create compliant hydroelastic bodies.
+- The Drake Convex Shape type can be used as a compliant hydroelastic body.
 
 @subsection hug_not_yet_implemented What can’t you do with hydroelastic contact?
 
@@ -599,8 +600,11 @@ indicate what can and cannot be done with hydroelastic contact.
   supported. If you need rigid-rigid contact, consider hydroelastics with
   fallback (kHydroelasticWithFallback). See @ref hug_enabling on how to deal
   with contact in these cases.
-- Drake Mesh and Convex types cannot currently serve as a compliant
-  hydroelastic geometry.
+- The Drake Mesh Shape type cannot currently serve as a compliant
+  hydroelastic geometry. However, if the mesh is convex, one can use the
+  Drake Convex Shape type as a compliant hydroelastic geometry. To do so, add
+  the custom tag `<drake:declare_convex/>` tag under the `<mesh>` tag in either
+  an SDF or URDF file.
 - Hydroelastics cannot model true deformations given the model does not
   introduce state. Therefore effects such as tangential compliance or
   short time scale waves are not captured by the model.

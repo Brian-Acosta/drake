@@ -17,7 +17,7 @@
 namespace drake {
 namespace multibody {
 
-/// This class represents a _spatial velocity_ (also called a _twist_) and has
+/// This class represents a _spatial velocity_ V (also called a _twist_) and has
 /// 6 elements with an angular (rotational) velocity ω (3-element vector) on top
 /// of a translational (linear) velocity v (3-element vector). Spatial velocity
 /// represents the rotational and translational motion of a frame B with respect
@@ -32,8 +32,8 @@ namespace multibody {
 /// velocity measured in M, expressed in E), where Bo is frame B's origin point.
 /// For an @ref multibody_frames_and_bodies "offset frame" Bp, the monogram
 /// notation V_MBp_E denotes the spatial velocity of frame Bp measured in M,
-/// expressed in E.  Details on spatial vectors and monogram notation are
-/// in section @ref multibody_spatial_vectors.
+/// expressed in E. Details on spatial vectors and monogram notation are in
+/// sections @ref multibody_spatial_vectors and @ref multibody_quantities.
 ///
 /// @tparam_default_scalar
 template <typename T>
@@ -53,12 +53,12 @@ class SpatialVelocity : public SpatialVector<SpatialVelocity, T> {
   /// uninitialized spatial velocity fail fast (fast bug detection).
   SpatialVelocity() : Base() {}
 
-  /// Constructs a spatial velocity from an angular velocity @p ω and a
-  /// translational velocity @p v.
+  /// Constructs a spatial velocity V from an angular velocity ω and a
+  /// translational velocity v.
   SpatialVelocity(const Eigen::Ref<const Vector3<T>>& w,
                   const Eigen::Ref<const Vector3<T>>& v) : Base(w, v) {}
 
-  /// Constructs a spatial velocity from an Eigen expression that represents a
+  /// Constructs a spatial velocity V from an Eigen expression that represents a
   /// 6-element vector, i.e., two 3-element vectors, namely an angular velocity
   /// ω and a translational velocity v.  This constructor will assert the size
   /// of V is six (6) either at compile-time for fixed sized Eigen expressions
@@ -86,13 +86,13 @@ class SpatialVelocity : public SpatialVector<SpatialVelocity, T> {
     return *this;
     // Note: this operation is linear. [Jain 2010], (§1.4, page 12) uses the
     // "rigid body transformation operator" to write this as:
-    //   V_MC = Φᵀ(p_BoCo) V_MB  where `Φᵀ(p_BoCo)` is the linear operator:
-    //   Φᵀ(p_BoCo) = |  I₃       0  |
-    //                | -px_BoCo  I₃ |
-    // where `px_BoCo` denotes the cross product skew-symmetric matrix such that
-    // `px_BoCo vec = p_BoCo x vec` (where vec is any vector).
-    // This same operator (not its transpose as for spatial velocities) allows
-    // us to shift spatial forces, see SpatialForce::Shift().
+    //    V_MC = Φᵀ(p_BoCo) V_MB    where Φᵀ(p) is the linear operator:
+    //   Φᵀ(p) = | I₃   0₃ |
+    //           | -pₓ  I₃ |       I₃ is the 3x3 identity matrix, 0₃ is the 3x3
+    // zero matrix, and pₓ denotes the skew-symmetric cross product matrix such
+    // that pₓvec = p x vec (where vec is any vector). This Φᵀ operator shifts
+    // spatial velocity whereas the Φ operator shifts spatial force and spatial
+    // momentum (see SpatialForce::Shift() and SpatialMomentum:Shift()).
     //
     // - [Jain 2010] Jain, A., 2010. Robot and multibody dynamics: analysis and
     //               algorithms. Springer Science & Business Media, pp. 123-130.
@@ -100,13 +100,13 @@ class SpatialVelocity : public SpatialVector<SpatialVelocity, T> {
 
   /// Shifts a %SpatialVelocity from a frame B to a frame C, where both B and C
   /// are fixed to the same frame or rigid body.
-  /// This method differs from ShiftInPlace() in that this method does not
-  /// modify `this` whereas ShiftInPlace() does modify `this`.
   /// @param[in] offset which is the position vector p_BoCo_E from frame B's
   /// origin to frame C's origin, expressed in frame E. p_BoCo_E must have the
   /// same expressed-in frame E as `this` spatial velocity (`this` = V_MB_E).
   /// @retval V_MC_E which is frame C's spatial velocity measured in frame M,
   /// expressed in frame E.
+  /// @note Shift() differs from ShiftInPlace() in that Shift() does not modify
+  /// `this` whereas ShiftInPlace() does modify `this`.
   /// @see ShiftInPlace() for more information and how V_MC_E is calculated.
   SpatialVelocity<T> Shift(const Vector3<T>& offset) const {
     return SpatialVelocity<T>(*this).ShiftInPlace(offset);
@@ -128,7 +128,9 @@ class SpatialVelocity : public SpatialVector<SpatialVelocity, T> {
   ///  v_MCo_E = v_MBo_E + ω_MB_E x p_BoCo_E + v_BCo_E
   /// </pre>
   /// If frame C is rigidly fixed to frame B, V_BC_E = 0 and this method
-  /// produces a Shift() operation (albeit inefficiently).
+  /// produces a Shift() operation (albeit inefficiently). In other words, use
+  /// Shift() if velocity_of_moving_frame = 0.
+  /// @see SpatialAcceleration::ComposeWithMovingFrameAcceleration().
   SpatialVelocity<T> ComposeWithMovingFrameVelocity(
       const Vector3<T>& position_of_moving_frame,
       const SpatialVelocity<T>& velocity_of_moving_frame) const {
@@ -187,21 +189,21 @@ class SpatialVelocity : public SpatialVector<SpatialVelocity, T> {
 /// Adds two spatial velocities by simply adding their 6 underlying elements.
 /// @param[in] V1_E spatial velocity expressed in the same frame E as V2_E.
 /// @param[in] V2_E spatial velocity expressed in the same frame E as V1_E.
-/// @note The general utility of this method is questionable and this method
-/// should only be used if you are sure it makes sense.  One use case is for
-/// calculating the spatial velocity V_MC of a frame C measured in a frame M
+/// @note The general utility of this operator+() function is questionable and
+/// it should only be used if you are sure it makes sense.  One use case is
+/// for calculating the spatial velocity V_MC of a frame C measured in a frame M
 /// when frame C is moving relative to a frame B and one has pre-calculated
 /// V_MBc (frame Bc's spatial velocity measured in frame M, where frame Bc is
-/// instantaneously coincident with frame C).
-/// For this use case, this method returns V_MC_E = V_MBc_E + V_BC_E, where
-/// the precalculated V_MBc_E is equal to V_MBo_E.Shift(p_BoCo_E).
-/// @see related methods ShiftInPlace() and ComposeWithMovingFrameVelocity().
+/// instantaneously coincident with frame C). For this use case, the operator+
+/// function returns V_MC_E = V_MBc_E + V_BC_E, where the precalculated V_MBc_E
+/// is equal to V_MBo_E.Shift(p_BoCo_E).
+/// @see Shift(), ShiftInPlace(), and ComposeWithMovingFrameVelocity().
 /// @relates SpatialVelocity
 template <typename T>
 inline SpatialVelocity<T> operator+(
     const SpatialVelocity<T>& V1_E, const SpatialVelocity<T>& V2_E) {
-  // Although this method is implemented by simply calling the corresponding
-  // SpatialVector implementation, it is needed for documentation.
+  // Although this operator+() function simply calls an associated
+  // SpatialVector operator+=() function, it is needed for documentation.
   return SpatialVelocity<T>(V1_E) += V2_E;
 }
 
@@ -209,13 +211,13 @@ inline SpatialVelocity<T> operator+(
 /// elements.
 /// @param[in] V1_E spatial velocity expressed in the same frame E as V2_E.
 /// @param[in] V2_E spatial velocity expressed in the same frame E as V1_E.
-/// @note This method should only be used if you are sure it makes sense.
+/// @note The general utility of this operator-() function is questionable and
+/// it should only be used if you are sure it makes sense.
 /// One use case is for calculating relative spatial velocity, e.g., a frame C's
-/// spatial velocity relative to a frame B, measure in a frame M.  For this use
-/// case, this method returns V_M_BC_E = V_MC_E - V_MB_E, which contains ω_BC
-/// (C's angular velocity measured in B) and v_M_BoCo (Co's velocity relative to
-/// Bo, measured in M), where both ω_BC and v_M_BoCo are expressed in frame E.
-/// <pre>
+/// spatial velocity relative to a frame B, measure in a frame M. This use case
+/// calculates V_M_BC_E = V_MC_E - V_MB_E, which contains ω_BC (C's angular
+/// velocity measured in B) and v_M_BoCo (Co's velocity relative to Bo, measured
+/// in M), where both ω_BC and v_M_BoCo are expressed in frame E. <pre>
 ///  ω_BC  = ω_MC - ω_MB
 ///  v_M_BoCo = v_MCo - v_MBo = DtM(p_BoCo)
 /// </pre>
@@ -227,13 +229,13 @@ inline SpatialVelocity<T> operator+(
 /// where frame Bc is fixed to B and instantaneously coincident with frame C.
 /// This use case returns V_BC_E = V_MC_E - V_MBc_E, where the precalculated
 /// V_MBc_E is equal to V_MBo_E.Shift(p_BoBc_E).
-/// @see related methods ShiftInPlace() and ComposeWithMovingFrameVelocity().
+/// @see Shift(), ShiftInPlace(), and ComposeWithMovingFrameVelocity().
 /// @relates SpatialVelocity
 template <typename T>
 inline SpatialVelocity<T> operator-(
     const SpatialVelocity<T>& V1_E, const SpatialVelocity<T>& V2_E) {
-  // Although this method is implemented by simply calling the corresponding
-  // SpatialVector implementation, it is needed for documentation.
+  // Although this operator-() function simply calls an associated
+  // SpatialVector operator-=() function, it is needed for documentation.
   return SpatialVelocity<T>(V1_E) -= V2_E;
 }
 

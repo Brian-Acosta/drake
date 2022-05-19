@@ -168,7 +168,7 @@ GTEST_TEST(FileParserTest, ExtensionMatchTest) {
   // URDF parser, shown here by it generating a different exception message).
   DRAKE_EXPECT_THROWS_MESSAGE(
       Parser(&plant).AddModelFromFile("acrobot.SDF"),
-      ".*\n.*Unable to read file.*");
+      ".*Unable to read file.*");
   DRAKE_EXPECT_THROWS_MESSAGE(
       Parser(&plant).AddModelFromFile("acrobot.URDF"),
       "/.*/acrobot.URDF:0: error: "
@@ -180,7 +180,7 @@ GTEST_TEST(FileParserTest, BadStringTest) {
   MultibodyPlant<double> plant(0.0);
   DRAKE_EXPECT_THROWS_MESSAGE(
       Parser(&plant).AddModelFromString("bad", "sdf"),
-      ".*\n.*Unable to read SDF string.*");
+      ".*Unable to read SDF string.*");
 
   // Malformed URDF string is an error.
   DRAKE_EXPECT_THROWS_MESSAGE(
@@ -227,11 +227,34 @@ GTEST_TEST(FileParserTest, PackageMapTest) {
   // Attempt to read in the SDF file without setting the package map first.
   const std::string new_sdf_filename = sdf_path + "/box.sdf";
   DRAKE_EXPECT_THROWS_MESSAGE(parser.AddModelFromFile(new_sdf_filename),
-      ".*ERROR: Mesh file name could not be resolved from the provided uri.*");
+      "error.*unknown package.*box_model.*");
 
   // Try again.
   parser.package_map().PopulateFromFolder(temp_dir);
   parser.AddModelFromFile(new_sdf_filename, "dummy" /* model name */);
+}
+
+GTEST_TEST(FileParserTest, StrictParsing) {
+  // If the choice of what causes warnings changes, this test data will need to
+  // be updated. In this incarnation, the /robot/@version attribute provokes a
+  // warning because it is ignored.
+  std::string model_provokes_warning = R"""(
+    <robot name='robot' version='0.99'>
+      <link name='a'/>
+    </robot>)""";
+  std::string warning_pattern = ".*version.*ignored.*";
+
+  MultibodyPlant<double> plant(0.0);
+  geometry::SceneGraph<double> scene_graph;
+  Parser parser(&plant, &scene_graph);
+
+  EXPECT_NO_THROW(
+      parser.AddModelFromString(model_provokes_warning, "urdf", "lax"));
+
+  parser.SetStrictParsing();
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      parser.AddModelFromString(model_provokes_warning, "urdf", "strict"),
+      warning_pattern);
 }
 
 }  // namespace

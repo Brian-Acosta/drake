@@ -23,7 +23,6 @@ constexpr int kNaturalDimension = 3;
 constexpr int kSpatialDimension = 3;
 constexpr int kQuadratureOrder = 1;
 constexpr double kEpsilon = 1e-14;
-const FemElementIndex kZeroIndex(0);
 using AD = AutoDiffXd;
 using QuadratureType =
     internal::SimplexGaussianQuadrature<kNaturalDimension, kQuadratureOrder>;
@@ -76,9 +75,8 @@ class VolumetricElementTest : public ::testing::Test {
     Eigen::Matrix<AD, kSpatialDimension, kNumNodes> X = reference_positions();
     ConstitutiveModelType constitutive_model(kYoungsModulus, kPoissonRatio);
     DampingModel<AD> damping_model(0, 0);
-    elements_.emplace_back(kZeroIndex, kNodeIndices,
-                           std::move(constitutive_model), X, kDensity,
-                           std::move(damping_model));
+    elements_.emplace_back(kNodeIndices, std::move(constitutive_model), X,
+                           kDensity, std::move(damping_model));
   }
 
   /* Makes an FemState to be consumed by the unit tests with the given q, v, and
@@ -218,15 +216,6 @@ class VolumetricElementTest : public ::testing::Test {
     return mass_matrix;
   }
 
-  /* Returns the gravity force acting on the nodes of the only element with
-   the given `fem_state`. */
-  Vector<AD, kNumDofs> CalcGravityForce(const FemState<AD>& fem_state) const {
-    Vector<AD, kNumDofs> gravity_force = Vector<AD, kNumDofs>::Zero();
-    element().AddScaledGravityForce(EvalElementData(fem_state), 1.0,
-                                    &gravity_force);
-    return gravity_force;
-  }
-
   unique_ptr<FemStateSystem<AD>> fem_state_system_;
   systems::CacheIndex cache_index_;
   std::vector<ElementType> elements_;
@@ -236,11 +225,9 @@ namespace {
 
 TEST_F(VolumetricElementTest, Constructor) {
   EXPECT_EQ(element().node_indices(), kNodeIndices);
-  EXPECT_EQ(element().element_index(), kZeroIndex);
   EXPECT_EQ(density(element()), kDensity);
   ElementType move_constructed_element(std::move(elements_[0]));
   EXPECT_EQ(move_constructed_element.node_indices(), kNodeIndices);
-  EXPECT_EQ(move_constructed_element.element_index(), kZeroIndex);
   EXPECT_EQ(density(move_constructed_element), kDensity);
 }
 
@@ -358,24 +345,23 @@ TEST_F(VolumetricElementTest, MassMatrixSumUpToTotalMass) {
   EXPECT_NEAR(mass_matrix_sum, total_mass * kSpatialDimension, kEpsilon);
 }
 
-/* Tests that the gravity forces match the expected value. */
-TEST_F(VolumetricElementTest, Gravity) {
-  unique_ptr<FemState<AD>> reference_fem_state = MakeReferenceState();
-  const Eigen::Matrix<AD, kNumDofs, kNumDofs>& mass_matrix =
-      CalcMassMatrix(*reference_fem_state);
-  Vector<AD, kNumDofs> element_gravity_acceleration;
-  for (int i = 0; i < kNumNodes; ++i) {
-    element_gravity_acceleration.template segment<kSpatialDimension>(
-        i * kSpatialDimension) = element().gravity_vector();
-  }
-  const Vector<AD, kNumDofs> expected_gravity_force =
-      mass_matrix * element_gravity_acceleration;
-
-  EXPECT_TRUE(CompareMatrices(expected_gravity_force,
-                              CalcGravityForce(*reference_fem_state)));
-  unique_ptr<FemState<AD>> deformed_fem_state = MakeDeformedState();
-  EXPECT_TRUE(CompareMatrices(expected_gravity_force,
-                              CalcGravityForce(*deformed_fem_state)));
+TEST_F(VolumetricElementTest, AddScaledGravityForce) {
+  const Vector3<AD> gravity_vector(1, 2, 3);
+  VectorX<AD> scaled_gravity_force = VectorX<AD>::Zero(kNumDofs);
+  const double scale = 2.0;
+  unique_ptr<FemState<AD>> fem_state = MakeDeformedState();
+  const Data& data = EvalElementData(*fem_state);
+  /* Calculate the gravity force using the implementation in VolumetricElement.
+   */
+  element().AddScaledGravityForce(data, scale, gravity_vector,
+                                  &scaled_gravity_force);
+  /* Use the implementation in the base class as the reference. */
+  VectorX<AD> expected_scaled_gravity_force = VectorX<AD>::Zero(kNumDofs);
+  const FemElement<ElementType>& base_fem_element = element();
+  base_fem_element.AddScaledGravityForce(data, scale, gravity_vector,
+                                         &expected_scaled_gravity_force);
+  EXPECT_TRUE(CompareMatrices(expected_scaled_gravity_force,
+                              scaled_gravity_force, kEpsilon));
 }
 
 }  // namespace

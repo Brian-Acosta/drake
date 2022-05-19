@@ -294,7 +294,7 @@ class TestTrajectories(unittest.TestCase):
         numpy_compare.assert_float_equal(pp.end_time(), -1.0)
 
     @numpy_compare.check_all_types
-    def test_reshape_and_block(self, T):
+    def test_reshape_block_and_transpose(self, T):
         PiecewisePolynomial = PiecewisePolynomial_[T]
 
         t = [0., 1., 2., 3.]
@@ -308,6 +308,9 @@ class TestTrajectories(unittest.TestCase):
         pp2 = pp.Block(start_row=0, start_col=0, block_rows=2, block_cols=1)
         self.assertEqual(pp2.rows(), 2)
         self.assertEqual(pp2.cols(), 1)
+        pp3 = pp2.Transpose()
+        self.assertEqual(pp3.rows(), 1)
+        self.assertEqual(pp3.cols(), 2)
 
     @numpy_compare.check_all_types
     def test_slice_and_shift(self, T):
@@ -376,22 +379,26 @@ class TestTrajectories(unittest.TestCase):
         # Test quaternion constructor.
         pq = PiecewiseQuaternionSlerp(breaks=t, quaternions=[q, q, q])
         self.assertEqual(pq.get_number_of_segments(), 2)
-        numpy_compare.assert_float_equal(pq.value(0.5), np.eye(3))
+        numpy_compare.assert_float_equal(pq.value(0.5),
+                                         [[1.], [0.], [0.], [0.]])
 
         # Test matrix constructor.
         pq = PiecewiseQuaternionSlerp(breaks=t, rotation_matrices=[m, m, m])
         self.assertEqual(pq.get_number_of_segments(), 2)
-        numpy_compare.assert_float_equal(pq.value(0.5), np.eye(3))
+        numpy_compare.assert_float_equal(pq.value(0.5),
+                                         [[1.], [0.], [0.], [0.]])
 
         # Test axis angle constructor.
         pq = PiecewiseQuaternionSlerp(breaks=t, angle_axes=[a, a, a])
         self.assertEqual(pq.get_number_of_segments(), 2)
-        numpy_compare.assert_float_equal(pq.value(0.5), np.eye(3))
+        numpy_compare.assert_float_equal(pq.value(0.5),
+                                         [[1.], [0.], [0.], [0.]])
 
         # Test rotation matrix constructor.
         pq = PiecewiseQuaternionSlerp(breaks=t, rotation_matrices=[R, R, R])
         self.assertEqual(pq.get_number_of_segments(), 2)
-        numpy_compare.assert_float_equal(pq.value(0.5), np.eye(3))
+        numpy_compare.assert_float_equal(pq.value(0.5),
+                                         [[1.], [0.], [0.], [0.]])
 
         # Test append operations.
         pq.Append(time=3., quaternion=q)

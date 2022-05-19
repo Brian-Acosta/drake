@@ -22,56 +22,35 @@
 #include "drake/common/name_value.h"
 #include "drake/common/nice_type_name.h"
 #include "drake/common/unused.h"
+#include "drake/common/yaml/yaml_io_options.h"
 #include "drake/common/yaml/yaml_node.h"
 
 namespace drake {
 namespace yaml {
+namespace internal {
 
-/// (Advanced) A helper class for @ref yaml_serialization "YAML Serialization"
-/// that loads data from a YAML file into a C++ structure.
+// A helper class for @ref yaml_serialization "YAML Serialization" that loads
+// data from a YAML file into a C++ structure.
 class YamlReadArchive final {
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(YamlReadArchive)
 
-  /// Configuration for YamlReadArchive to govern when certain conditions are
-  /// errors or not.  Refer to the member fields for details.
-  struct Options {
-    friend std::ostream& operator<<(std::ostream& os, const Options& x);
+  using Options
+      DRAKE_DEPRECATED("2022-09-01", "Use drake::yaml::LoadYamlOptions instead")
+      = LoadYamlOptions;
 
-    /// Allows yaml Maps to have extra key-value pairs that are not Visited by
-    /// the Serializable being parsed into.  In other words, the Serializable
-    /// types provide an incomplete schema for the YAML data.  This allows for
-    /// parsing only a subset of the YAML data.
-    bool allow_yaml_with_no_cpp{false};
+  YamlReadArchive(internal::Node root, const LoadYamlOptions& options);
 
-    /// Allows Serializables to provide more key-value pairs than are present
-    /// in the YAML data.  In other words, the structs have default values that
-    /// are left intact unless the YAML data provides a value.
-    bool allow_cpp_with_no_yaml{false};
-
-    /// If set to true, when parsing a std::map the Archive will merge the YAML
-    /// data into the destination, instead of replacing the std::map contents
-    /// entirely.  In other words, a visited std::map can have default values
-    /// that are left intact unless the YAML data provides a value *for that
-    /// specific key*.
-    bool retain_map_defaults{false};
-  };
-
-  /// (Internal use only.)
-  YamlReadArchive(internal::Node root, const Options& options);
-
-  /// (Internal use only.)
   static internal::Node LoadFileAsNode(
       const std::string& filename,
       const std::optional<std::string>& child_name);
 
-  /// (Internal use only.)
   static internal::Node LoadStringAsNode(
       const std::string& data,
       const std::optional<std::string>& child_name);
 
-  /// (Advanced) Sets the contents `serializable` based on the YAML file
-  /// associated this archive.
+  // Sets the contents `serializable` based on the YAML file associated this
+  // archive.
   template <typename Serializable>
   void Accept(Serializable* serializable) {
     DRAKE_THROW_UNLESS(serializable != nullptr);
@@ -79,9 +58,8 @@ class YamlReadArchive final {
     CheckAllAccepted();
   }
 
-  /// (Advanced) Sets the value pointed to by `nvp.value()` based on the YAML
-  /// file associated with this archive.  Most users should call Accept, not
-  /// Visit.
+  // Sets the value pointed to by `nvp.value()` based on the YAML file
+  // associated with this archive.  Most users should call Accept, not Visit.
   template <typename NameValuePair>
   void Visit(const NameValuePair& nvp) {
     this->Visit(nvp, VisitShouldMemorizeType::kYes);
@@ -568,7 +546,7 @@ class YamlReadArchive final {
 
   // When the C++ structure and YAML structure disagree, these options govern
   // which mismatches are permitted without an error.
-  const Options options_;
+  const LoadYamlOptions options_;
 
   // The set of NameValue::name keys that have been Visited by the current
   // Serializable's Accept method so far.
@@ -580,6 +558,12 @@ class YamlReadArchive final {
   const char* debug_visit_name_{};
   const std::type_info* debug_visit_type_{};
 };
+
+}  // namespace internal
+
+using YamlReadArchive
+    DRAKE_DEPRECATED("2022-09-01", "Use the yaml_io.h functions instead")
+    = internal::YamlReadArchive;
 
 }  // namespace yaml
 }  // namespace drake

@@ -10,6 +10,7 @@
 
 namespace drake {
 namespace yaml {
+namespace internal {
 namespace {
 
 // The source and destination are both of type Map.  Copy the key-value pairs
@@ -146,7 +147,9 @@ internal::Node ConvertJbederYamlNodeToDrakeYamlNode(
 
 }  // namespace
 
-YamlReadArchive::YamlReadArchive(internal::Node root, const Options& options)
+YamlReadArchive::YamlReadArchive(
+    internal::Node root,
+    const LoadYamlOptions& options)
     : owned_root_(std::move(root)),
       root_(&owned_root_.value()),
       mapish_item_key_(nullptr),
@@ -381,14 +384,6 @@ void YamlReadArchive::PrintVisitNameType(std::ostream& s) const {
              debug_visit_name_);
 }
 
-std::ostream& operator<<(std::ostream& os, const YamlReadArchive::Options& x) {
-  return os << "{.allow_yaml_with_no_cpp = "
-            << x.allow_yaml_with_no_cpp
-            << ", .allow_cpp_with_no_yaml = "
-            << x.allow_cpp_with_no_yaml
-            << ", .retain_map_defaults = "
-            << x.retain_map_defaults << "}";
-}
-
+}  // namespace internal
 }  // namespace yaml
 }  // namespace drake

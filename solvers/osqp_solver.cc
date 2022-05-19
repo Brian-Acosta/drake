@@ -1,5 +1,7 @@
 #include "drake/solvers/osqp_solver.h"
 
+#include <optional>
+#include <unordered_map>
 #include <vector>
 
 #include <osqp.h>
@@ -127,7 +129,7 @@ void ParseLinearConstraints(
     const std::vector<int> x_indices =
         prog.FindDecisionVariableIndices(constraint.variables());
     const std::vector<Eigen::Triplet<double>> Ai_triplets =
-        math::SparseMatrixToTriplets(constraint.evaluator()->A());
+        math::SparseMatrixToTriplets(constraint.evaluator()->get_sparse_A());
     const Binding<Constraint> constraint_cast =
         internal::BindingDynamicCast<Constraint>(constraint);
     constraint_start_row->emplace(constraint_cast, *num_A_rows);

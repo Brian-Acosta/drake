@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Install development and runtime prerequisites for both binary and source
-# distributions of Drake on Ubuntu 18.04 (Bionic) or 20.04 (Focal).
+# distributions of Drake on Ubuntu 20.04 (Focal).
 
 set -euo pipefail
 
@@ -24,19 +24,16 @@ while [ "${1:-}" != "" ]; do
     --with-doc-only)
       source_distribution_args+=(--with-doc-only)
       ;;
-    # Install the kcov code coverage analysis tool from the
-    # drake-apt.csail.mit.edu apt repository on Ubuntu 18.04 (Bionic). Ignored
-    # on Ubuntu 20.04 (Focal) where kcov is always installed from the Ubuntu
-    # "universe" apt repository.
+    # TODO(betsymcphail): Remove this deprecated option on or after 2022-08-01
     --with-kcov)
       source_distribution_args+=(--with-kcov)
       ;;
-    # Install prerequisites that are only needed to when CC=clang-9, i.e.,
+    # Install prerequisites that are only needed for --config clang, i.e.,
     # opts-in to the ability to compile Drake's C++ code using Clang.
     --with-clang)
       source_distribution_args+=(--with-clang)
       ;;
-    # Do NOT install prerequisites that are only needed to when CC=clang-9,
+    # Do NOT install prerequisites that are only needed for --config clang,
     # i.e., opts-out of the ability to compile Drake's C++ code using Clang.
     --without-clang)
       source_distribution_args+=(--without-clang)

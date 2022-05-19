@@ -21,8 +21,8 @@ Drake binary releases incorporate a pre-compiled version of
 [Mathematical Program toolbox](https://drake.mit.edu/doxygen_cxx/group__solvers.html).
 Thanks to Philip E. Gill and Elizabeth Wong for their kind support.
 
-Drake's pip packages do not support the MOSEK™ nor Gurobi solvers. To use
-MOSEK™ or Gurobi, you will need to [build Drake from source](/from_source.html).
+Drake's pip packages do not support the Gurobi solver. To use
+Gurobi, you will need to [build Drake from source](/from_source.html).
 
 ## Stable Releases
 
@@ -65,13 +65,6 @@ env/bin/pip install drake
 ```
 
 Drake requires certain basic runtime libraries from the host linux distribution.
-
-For Ubuntu 18.04, install these additional libraries:
-
-```bash
-sudo apt-get install --no-install-recommends \
-  libpython3.6 libx11-6 libsm6 libxt6 libglib2.0-0
-```
 
 For Ubuntu 20.04, install these additional libraries:
 

@@ -12,9 +12,10 @@ def rules_python_repository(
     github_archive(
         name = name,
         repository = "bazelbuild/rules_python",  # License: Apache-2.0
-        # The commit (version) here should be identical to the commit listed in
+        # The commit (version) and sha256 here should be identical to the
+        # commit listed in
         # drake/tools/install/bazel/test/drake_bazel_installed_test.py.
-        commit = "0.6.0",
-        sha256 = "a30abdfc7126d497a7698c29c46ea9901c6392d6ed315171a6df5ce433aa4502",  # noqa
+        commit = "0.8.1",
+        sha256 = "cdf6b84084aad8f10bf20b46b77cb48d83c319ebe6458a18e9d2cebf57807cdd",  # noqa
         mirrors = mirrors,
     )

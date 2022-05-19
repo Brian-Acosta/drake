@@ -11,6 +11,7 @@
 namespace drake {
 namespace multibody {
 
+using drake::internal::DiagnosticDetail;
 using internal::AddModelFromSdf;
 using internal::AddModelFromUrdf;
 using internal::AddModelsFromSdf;
@@ -26,6 +27,16 @@ Parser::Parser(
   if (scene_graph != nullptr && !plant->geometry_source_is_registered()) {
     plant->RegisterAsSourceForSceneGraph(scene_graph);
   }
+
+  auto warnings_maybe_strict =
+      [this](const DiagnosticDetail& detail) {
+        if (is_strict_) {
+          diagnostic_policy_.Error(detail);
+        } else {
+          diagnostic_policy_.WarningDefaultAction(detail);
+        }
+      };
+  diagnostic_policy_.SetActionForWarnings(warnings_maybe_strict);
 }
 
 namespace {
@@ -47,11 +58,11 @@ FileType DetermineFileType(const std::string& file_name) {
 std::vector<ModelInstanceIndex> Parser::AddAllModelsFromFile(
     const std::string& file_name) {
   DataSource data_source(DataSource::kFilename, &file_name);
+  ParsingWorkspace workspace{package_map_, diagnostic_policy_, plant_};
   const FileType type = DetermineFileType(file_name);
   if (type == FileType::kSdf) {
-    return AddModelsFromSdf(data_source, package_map_, plant_);
+    return AddModelsFromSdf(data_source, workspace);
   } else {
-    ParsingWorkspace workspace{package_map_, diagnostic_policy_, plant_};
     const std::optional<ModelInstanceIndex> maybe_model =
         AddModelFromUrdf(data_source, {}, {}, workspace);
     if (maybe_model.has_value()) {
@@ -67,20 +78,19 @@ ModelInstanceIndex Parser::AddModelFromFile(
     const std::string& file_name,
     const std::string& model_name) {
   DataSource data_source(DataSource::kFilename, &file_name);
+  ParsingWorkspace workspace{package_map_, diagnostic_policy_, plant_};
   const FileType type = DetermineFileType(file_name);
+  std::optional<ModelInstanceIndex> maybe_model;
   if (type == FileType::kSdf) {
-    return AddModelFromSdf(data_source, model_name, package_map_, plant_);
+    maybe_model = AddModelFromSdf(data_source, model_name, workspace);
   } else {
-    ParsingWorkspace workspace{package_map_, diagnostic_policy_, plant_};
-    const std::optional<ModelInstanceIndex> maybe_model =
-        AddModelFromUrdf(data_source, model_name, {}, workspace);
-    if (maybe_model.has_value()) {
-      return *maybe_model;
-    } else {
-      throw std::runtime_error(
-          fmt::format("{}: URDF model file parsing failed", file_name));
-    }
+    maybe_model = AddModelFromUrdf(data_source, model_name, {}, workspace);
   }
+  if (!maybe_model.has_value()) {
+    throw std::runtime_error(
+        fmt::format("{}: parsing failed", file_name));
+  }
+  return *maybe_model;
 }
 
 ModelInstanceIndex Parser::AddModelFromString(
@@ -89,20 +99,19 @@ ModelInstanceIndex Parser::AddModelFromString(
     const std::string& model_name) {
   DataSource data_source(DataSource::kContents, &file_contents);
   const std::string pseudo_name(data_source.GetStem() + "." + file_type);
+  ParsingWorkspace workspace{package_map_, diagnostic_policy_, plant_};
   const FileType type = DetermineFileType(pseudo_name);
+  std::optional<ModelInstanceIndex> maybe_model;
   if (type == FileType::kSdf) {
-    return AddModelFromSdf(data_source, model_name, package_map_, plant_);
+    maybe_model = AddModelFromSdf(data_source, model_name, workspace);
   } else {
-    ParsingWorkspace workspace{package_map_, diagnostic_policy_, plant_};
-    const std::optional<ModelInstanceIndex> maybe_model =
-        AddModelFromUrdf(data_source, model_name, {}, workspace);
-    if (maybe_model.has_value()) {
-      return *maybe_model;
-    } else {
-      throw std::runtime_error(
-          fmt::format("{}: URDF model string parsing failed", pseudo_name));
-    }
+    maybe_model = AddModelFromUrdf(data_source, model_name, {}, workspace);
   }
+  if (!maybe_model.has_value()) {
+    throw std::runtime_error(
+        fmt::format("{}: parsing failed", pseudo_name));
+  }
+  return *maybe_model;
 }
 
 }  // namespace multibody

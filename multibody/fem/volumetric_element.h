@@ -49,6 +49,28 @@ void PerformDoubleTensorContraction(
   }
 }
 
+/* The data struct that stores per element data for VolumetricElement. See
+ FemElement for the requirement. We define it here instead of nesting it in the
+ traits class below due to #17109. */
+template <typename ConstitutiveModelType, int num_dofs,
+          int num_quadrature_points>
+struct VolumetricElementData {
+  using T = typename ConstitutiveModelType::T;
+  /* The states evaluated at nodes of the element. */
+  Vector<T, num_dofs> element_q;
+  Vector<T, num_dofs> element_v;
+  Vector<T, num_dofs> element_a;
+  typename ConstitutiveModelType::Data deformation_gradient_data;
+  /* The elastic energy density evaluated at quadrature points. Note that this
+   is energy per unit of "reference" volume. */
+  std::array<T, num_quadrature_points> Psi;
+  /* The first Piola stress evaluated at quadrature points. */
+  std::array<Matrix3<T>, num_quadrature_points> P;
+  /* The derivative of first Piola stress with respect to the deformation
+   gradient evaluated at quadrature points. */
+  std::array<Eigen::Matrix<T, 9, 9>, num_quadrature_points> dPdF;
+};
+
 /* Forward declaration needed for defining the traits below. */
 template <class IsoparametricElementType, class QuadratureType,
           class ConstitutiveModelType>
@@ -116,21 +138,8 @@ struct FemElementTraits<VolumetricElement<
    nodes. */
   static constexpr int num_dofs = 3 * num_nodes;
 
-  struct Data {
-    /* The states evaluated at nodes of the element. */
-    Vector<T, num_dofs> element_q;
-    Vector<T, num_dofs> element_v;
-    Vector<T, num_dofs> element_a;
-    typename ConstitutiveModelType::Data deformation_gradient_data;
-    /* The elastic energy density evaluated at quadrature points. Note that this
-     is energy per unit of "reference" volume. */
-    std::array<T, num_quadrature_points> Psi;
-    /* The first Piola stress evaluated at quadrature points. */
-    std::array<Matrix3<T>, num_quadrature_points> P;
-    /* The derivative of first Piola stress with respect to the deformation
-     gradient evaluated at quadrature points. */
-    std::array<Eigen::Matrix<T, 9, 9>, num_quadrature_points> dPdF;
-  };
+  using Data = VolumetricElementData<ConstitutiveModelType, num_dofs,
+                                     num_quadrature_points>;
 };
 
 /* This class models a single 3D elasticity FEM element in which the
@@ -152,8 +161,13 @@ class VolumetricElement
     : public FemElement<VolumetricElement<
           IsoparametricElementType, QuadratureType, ConstitutiveModelType>> {
  public:
+  DRAKE_DEFAULT_COPY_AND_MOVE_AND_ASSIGN(VolumetricElement);
+
   using ElementType = VolumetricElement<IsoparametricElementType,
                                         QuadratureType, ConstitutiveModelType>;
+  using IsoparametricElement = IsoparametricElementType;
+  using Quadrature = QuadratureType;
+
   using Traits = FemElementTraits<ElementType>;
   using Data = typename Traits::Data;
   using T = typename Traits::T;
@@ -165,7 +179,6 @@ class VolumetricElement
 
   /* Constructs a new VolumetricElement. In that process, precomputes the mass
    matrix and the gravity force acting on the element.
-   @param[in] element_index        The index of the new element.
    @param[in] node_indices         The node indices of the nodes of this
                                    element.
    @param[in] constitutive_model   The ConstitutiveModel to be used for this
@@ -180,14 +193,12 @@ class VolumetricElement
    @param[in] damping_model        The DampingModel to be used for this element.
    @pre element_index and node_indices are valid.
    @pre density > 0. */
-  VolumetricElement(FemElementIndex element_index,
-                    const std::array<FemNodeIndex, num_nodes>& node_indices,
+  VolumetricElement(const std::array<FemNodeIndex, num_nodes>& node_indices,
                     ConstitutiveModelType constitutive_model,
                     const Eigen::Ref<const Eigen::Matrix<T, 3, num_nodes>>&
                         reference_positions,
                     T density, DampingModel<T> damping_model)
-      : FemElement<ElementType>(element_index, node_indices,
-                                std::move(constitutive_model),
+      : FemElement<ElementType>(node_indices, std::move(constitutive_model),
                                 std::move(damping_model)),
         density_(std::move(density)) {
     DRAKE_DEMAND(density_ > 0);
@@ -223,14 +234,6 @@ class VolumetricElement
     lumped_mass_ = mass_matrix_.rowwise().sum().eval();
   }
 
-  /* Assignment and copy constructions are prohibited. Move constructor is
-   allowed so that elasticity elements can be push_back/emplace_back into an
-   `std::vector`. */
-  VolumetricElement(const VolumetricElement&) = delete;
-  VolumetricElement(VolumetricElement&&) = default;
-  const VolumetricElement& operator=(const VolumetricElement&) = delete;
-  VolumetricElement&& operator=(const VolumetricElement&&) = delete;
-
   /* Calculates the elastic potential energy (in joules) stored in this element
    using the given `data`. */
   T CalcElasticEnergy(const Data& data) const {
@@ -239,6 +242,21 @@ class VolumetricElement
       elastic_energy += reference_volume_[q] * data.Psi[q];
     }
     return elastic_energy;
+  }
+
+  /* Computes the scaled gravity force on each node in the element using the
+   pre-calculated mass matrix with the given `gravity_vector`. */
+  void AddScaledGravityForce(const Data&, const T& scale,
+                             const Vector3<T>& gravity_vector,
+                             EigenPtr<Vector<T, num_dofs>> force) const {
+    constexpr int kDim = 3;
+    for (int a = 0; a < num_nodes; ++a) {
+      /* The following computation is equivalent to performing the matrix-vector
+       multiplication of the mass matrix and the stacked gravity vector. */
+      force->template segment<kDim>(kDim * a) +=
+          scale * lumped_mass_.template segment<kDim>(kDim * a).cwiseProduct(
+                      gravity_vector);
+    }
   }
 
  private:
@@ -360,16 +378,14 @@ class VolumetricElement
     }
   }
 
-  /* Implements FemElement::CalcResidual(). */
-  void DoCalcResidual(const Data& data,
-                      EigenPtr<Vector<T, num_dofs>> residual) const {
-    /* residual = Ma-fₑ(x)-fᵥ(x, v)-fₑₓₜ, where M is the mass matrix, fₑ(x) is
-     the elastic force, fᵥ(x, v) is the damping force and fₑₓₜ is the external
-     force. */
+  /* Implements FemElement::CalcInverseDynamics(). */
+  void DoCalcInverseDynamics(const Data& data,
+                             EigenPtr<Vector<T, num_dofs>> residual) const {
+    /* residual = Ma-fₑ(x)-fᵥ(x, v), where M is the mass matrix, fₑ(x) is
+     the elastic force, and fᵥ(x, v) is the damping force. */
     *residual += mass_matrix_ * data.element_a;
     this->AddNegativeElasticForce(data, residual);
     AddNegativeDampingForce(data, residual);
-    this->AddScaledExternalForce(data, -1.0, residual);
   }
 
   /* Implements FemElement::DoAddScaledStiffnessMatrix().
@@ -467,20 +483,6 @@ class VolumetricElement
       }
     }
     return mass_matrix;
-  }
-
-  /* Computes the gravity force on each node in the element using the stored
-   mass and gravity vector. */
-  void AddScaledGravityForce(const Data&, const T& scale,
-                             EigenPtr<Vector<T, num_dofs>> force) const {
-    constexpr int kDim = 3;
-    for (int a = 0; a < num_nodes; ++a) {
-      /* The following computation is equivalent to performing the matrix-vector
-       multiplication of the mass matrix and the stacked gravity vector. */
-      force->template segment<kDim>(kDim * a) +=
-          scale * lumped_mass_.template segment<kDim>(kDim * a).cwiseProduct(
-                      this->gravity_vector());
-    }
   }
 
   // TODO(xuchenhan-tri): Consider bumping this up into FemElement when new

@@ -1,6 +1,7 @@
 import copy
 import unittest
 
+from pydrake.common.test_utilities import numpy_compare
 from pydrake.symbolic import Variable, Expression
 from pydrake.autodiffutils import AutoDiffXd
 from pydrake.systems.primitives import (
@@ -35,11 +36,14 @@ class TestAnalysis(unittest.TestCase):
         options = RegionOfAttractionOptions()
         options.lyapunov_candidate = x*x
         options.state_variables = [x]
+        numpy_compare.assert_equal(options.state_variables, [x])
+        options.use_implicit_dynamics = False
         V = RegionOfAttraction(system=sys, context=context, options=options)
         self.assertEqual(repr(options), "".join([
             "RegionOfAttractionOptions(",
             "lyapunov_candidate=pow(x, 2), ",
-            "state_variables=[Variable('x', Continuous)])"]))
+            "state_variables=[Variable('x', Continuous)], "
+            "use_implicit_dynamics=False)"]))
 
     def test_integrator_constructors(self):
         """Test all constructors for all integrator types."""
@@ -79,6 +83,9 @@ class TestAnalysis(unittest.TestCase):
         system = ConstantVectorSource([1.])
         simulator = Simulator(system)
         self.assertIs(simulator.get_system(), system)
+        simulator.set_publish_every_time_step(publish=True)
+        simulator.set_publish_at_initialization(publish=True)
+        simulator.set_target_realtime_rate(realtime_rate=1.0)
 
     def test_simulator_status(self):
         SimulatorStatus.ReturnReason.kReachedBoundaryTime

@@ -85,7 +85,12 @@ class GraphOfConvexSets {
     /** Returns a const reference to the underlying ConvexSet. */
     const ConvexSet& set() const { return *set_; }
 
-    /** Returns the solution of x() in a MathematicalProgramResult. */
+    /** Returns the solution of x() in a MathematicalProgramResult.  This
+    solution is NaN if the vertex is not in the shortest path (or if we are
+    solving the the convex relaxation and the total flow through this vertex at
+    the solution is numerically close to zero).  We prefer to return NaN than a
+    value not contained in set().
+    */
     Eigen::VectorXd GetSolution(
         const solvers::MathematicalProgramResult& result) const;
 
@@ -205,6 +210,17 @@ class GraphOfConvexSets {
 
     /** Removes any constraints added with AddPhiConstraint. */
     void ClearPhiConstraints();
+
+    /** Returns all costs on this edge. */
+    const std::vector<solvers::Binding<solvers::Cost>>& GetCosts() const {
+      return costs_;
+    }
+
+    /** Returns all constraints on this edge. */
+    const std::vector<solvers::Binding<solvers::Constraint>>& GetConstraints()
+        const {
+      return constraints_;
+    }
 
     /** Returns the sum of the costs associated with this edge in a
     solvers::MathematicalProgramResult. */
@@ -350,6 +366,7 @@ class GraphOfConvexSets {
   @throws std::exception if any of the costs or constraints in the graph are
   incompatible with the shortest path formulation or otherwise unsupported.
   All costs must be non-negative (for all values of the continuous variables).
+
   @pydrake_mkdoc_identifier{by_id}
   */
   solvers::MathematicalProgramResult SolveShortestPath(
