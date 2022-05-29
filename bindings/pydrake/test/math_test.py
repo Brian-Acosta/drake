@@ -160,6 +160,8 @@ class TestMath(unittest.TestCase):
         check_equality(X.inverse(), X_I_np)
         self.assertIsInstance(
             X.multiply(other=RigidTransform()), RigidTransform)
+        self.assertIsInstance(
+            X.InvertAndCompose(other=RigidTransform()), RigidTransform)
         self.assertIsInstance(X @ RigidTransform(), RigidTransform)
         self.assertIsInstance(X @ [0, 0, 0], np.ndarray)
         if T != Expression:
@@ -268,6 +270,9 @@ class TestMath(unittest.TestCase):
         self.assertIsInstance(angle_axis, AngleAxis)
         R_AngleAxis = RotationMatrix(angle_axis)
         R_I = R.inverse().multiply(R_AngleAxis)
+        numpy_compare.assert_equal(R_I.IsNearlyIdentity(), True)
+        numpy_compare.assert_equal(R_I.IsNearlyIdentity(2E-15), True)
+        R_I = R.InvertAndCompose(other=R_AngleAxis)
         numpy_compare.assert_equal(R_I.IsNearlyIdentity(2E-15), True)
         # - Inverse, transpose, projection
         R_I = R.inverse().multiply(R)
@@ -402,8 +407,12 @@ class TestMath(unittest.TestCase):
         self.assertEqual(
             bspline.ComputeActiveBasisFunctionIndices(parameter_value=5.4),
             [0, 1])
+        val = bspline.EvaluateCurve(control_points=[[1, 2], [2, 3], [3, 4]],
+                                    parameter_value=5.7)
+        self.assertEqual(val.shape, (2,))
         numpy_compare.assert_float_equal(
             bspline.EvaluateBasisFunctionI(i=0, parameter_value=5.7), 0.)
+        assert_pickle(self, bspline, BsplineBasis.knots, T=T)
 
     @numpy_compare.check_all_types
     def test_wrap_to(self, T):
@@ -432,6 +441,12 @@ class TestMath(unittest.TestCase):
 
         self.assertFalse(mut.IsPositiveDefinite(matrix=A, tolerance=0))
         self.assertTrue(mut.IsPositiveDefinite(A.dot(A.T)))
+
+        lower_triangular = np.array([1, 2, 3, 4, 5, 6.])
+        symmetric_mat = mut.ToSymmetricMatrixFromLowerTriangularColumns(
+            lower_triangular_columns=lower_triangular)
+        np.testing.assert_array_equal(
+            symmetric_mat, np.array([[1, 2, 3], [2, 4, 5], [3, 5, 6]]))
 
     def test_quadratic_form(self):
         Q = np.diag([1., 2., 3.])

@@ -4,6 +4,7 @@
 #include <string>
 #include <utility>
 
+#include "drake/common/yaml/yaml_io_options.h"
 #include "drake/common/yaml/yaml_read_archive.h"
 #include "drake/common/yaml/yaml_write_archive.h"
 
@@ -35,7 +36,7 @@ static Serializable LoadYamlFile(
     const std::string& filename,
     const std::optional<std::string>& child_name = std::nullopt,
     const std::optional<Serializable>& defaults = std::nullopt,
-    const std::optional<YamlReadArchive::Options>& options = std::nullopt);
+    const std::optional<LoadYamlOptions>& options = std::nullopt);
 
 /** Loads data from a YAML-formatted string.
 
@@ -62,7 +63,7 @@ static Serializable LoadYamlString(
     const std::string& data,
     const std::optional<std::string>& child_name = std::nullopt,
     const std::optional<Serializable>& defaults = std::nullopt,
-    const std::optional<YamlReadArchive::Options>& options = std::nullopt);
+    const std::optional<LoadYamlOptions>& options = std::nullopt);
 
 /** Saves data as a YAML-formatted file.
 
@@ -124,18 +125,17 @@ template <typename Serializable>
 static Serializable LoadNode(
     internal::Node node,
     const std::optional<Serializable>& defaults,
-    const std::optional<YamlReadArchive::Options>& options) {
+    const std::optional<LoadYamlOptions>& options) {
   // Reify our optional arguments.
   Serializable result = defaults.value_or(Serializable{});
-  YamlReadArchive::Options new_options = options.value_or(
-      YamlReadArchive::Options{});
+  LoadYamlOptions new_options = options.value_or(LoadYamlOptions{});
   if (defaults.has_value() && !options.has_value()) {
     // Do not overwrite existing values.
     new_options.allow_cpp_with_no_yaml = true;
     new_options.retain_map_defaults = true;
   }
   // Parse and return.
-  YamlReadArchive(std::move(node), new_options).Accept(&result);
+  internal::YamlReadArchive(std::move(node), new_options).Accept(&result);
   return result;
 }
 
@@ -148,8 +148,9 @@ static Serializable LoadYamlFile(
     const std::string& filename,
     const std::optional<std::string>& child_name,
     const std::optional<Serializable>& defaults,
-    const std::optional<YamlReadArchive::Options>& options) {
-  internal::Node node = YamlReadArchive::LoadFileAsNode(filename, child_name);
+    const std::optional<LoadYamlOptions>& options) {
+  internal::Node node = internal::YamlReadArchive::LoadFileAsNode(
+      filename, child_name);
   return internal::LoadNode(std::move(node), defaults, options);
 }
 
@@ -160,8 +161,9 @@ static Serializable LoadYamlString(
     const std::string& data,
     const std::optional<std::string>& child_name,
     const std::optional<Serializable>& defaults,
-    const std::optional<YamlReadArchive::Options>& options) {
-  internal::Node node = YamlReadArchive::LoadStringAsNode(data, child_name);
+    const std::optional<LoadYamlOptions>& options) {
+  internal::Node node = internal::YamlReadArchive::LoadStringAsNode(
+      data, child_name);
   return internal::LoadNode(std::move(node), defaults, options);
 }
 
@@ -184,10 +186,10 @@ std::string SaveYamlString(
     const Serializable& data,
     const std::optional<std::string>& child_name,
     const std::optional<Serializable>& defaults) {
-  YamlWriteArchive archive;
+  internal::YamlWriteArchive archive;
   archive.Accept(data);
   if (defaults.has_value()) {
-    YamlWriteArchive defaults_archive;
+    internal::YamlWriteArchive defaults_archive;
     defaults_archive.Accept(defaults.value());
     archive.EraseMatchingMaps(defaults_archive);
   }

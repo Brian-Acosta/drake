@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <optional>
+#include <ostream>
 #include <tuple>
 #include <vector>
 
@@ -77,7 +78,7 @@ class LinearProgram1 : public OptimizationProgram {
 };
 
 // Test a simple linear programming problem
-// Adapted from https://docs.mosek.com/9.2/capi/tutorial-lo-shared.html
+// Adapted from https://docs.mosek.com/9.3/capi/tutorial-lo-shared.html
 // min -3x0 - x1 - 5x2 - x3
 // s.t     3x0 +  x1 + 2x2        = 30
 //   15 <= 2x0 +  x1 + 3x2 +  x3 <= inf
@@ -137,6 +138,8 @@ enum class LinearProblems {
   kLinearProgram3 = 4,
 };
 
+std::ostream& operator<<(std::ostream& os, LinearProblems value);
+
 class LinearProgramTest
     : public ::testing::TestWithParam<
         std::tuple<CostForm, ConstraintForm, LinearProblems>> {
@@ -186,6 +189,7 @@ class UnboundedLinearProgramTest0 : public ::testing::Test {
 
  protected:
   std::unique_ptr<MathematicalProgram> prog_;
+  Vector2<symbolic::Variable> x_;
 };
 
 /**

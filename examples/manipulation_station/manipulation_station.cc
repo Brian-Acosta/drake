@@ -6,7 +6,7 @@
 #include <utility>
 
 #include "drake/common/find_resource.h"
-#include "drake/geometry/render/render_engine_vtk_factory.h"
+#include "drake/geometry/render_vtk/factory.h"
 #include "drake/manipulation/schunk_wsg/schunk_wsg_constants.h"
 #include "drake/manipulation/schunk_wsg/schunk_wsg_position_controller.h"
 #include "drake/math/rigid_transform.h"
@@ -33,9 +33,9 @@ namespace manipulation_station {
 
 using Eigen::Vector3d;
 using Eigen::VectorXd;
+using geometry::MakeRenderEngineVtk;
+using geometry::RenderEngineVtkParams;
 using geometry::SceneGraph;
-using geometry::render::MakeRenderEngineVtk;
-using geometry::render::RenderEngineVtkParams;
 using math::RigidTransform;
 using math::RigidTransformd;
 using math::RollPitchYaw;
@@ -935,6 +935,25 @@ void ManipulationStation<T>::RegisterRgbdSensor(
   info.color_camera = color_camera;
 
   camera_information_[name] = info;
+
+  const std::string urdf_path = FindResourceOrThrow(
+      "drake/manipulation/models/realsense2_description/urdf/d415.urdf");
+  multibody::ModelInstanceIndex model_index = internal::AddAndWeldModelFrom(
+      urdf_path, name, parent_frame, "base_link", X_PC, plant_);
+
+  // Remove the perception properties -- the camera should not be visible to
+  // itself or else it obscures its own view. We only want the illustration
+  // properties so that the camera shows up in the visualizer.
+  const geometry::SourceId source_id = plant_->get_source_id().value();
+  for (const multibody::BodyIndex& body_index :
+           plant_->GetBodyIndices(model_index)) {
+    const multibody::Body<T>& body = plant_->get_body(body_index);
+    for (const geometry::GeometryId& geometry_id :
+             plant_->GetVisualGeometriesForBody(body)) {
+      scene_graph_->RemoveRole(source_id, geometry_id,
+          geometry::Role::kPerception);
+    }
+  }
 }
 
 template <typename T>

@@ -16,11 +16,11 @@
 #include "drake/common/default_scalars.h"
 #include "drake/common/nice_type_name.h"
 #include "drake/common/random.h"
+#include "drake/common/scope_exit.h"
 #include "drake/geometry/scene_graph.h"
 #include "drake/math/rigid_transform.h"
 #include "drake/multibody/contact_solvers/contact_solver.h"
 #include "drake/multibody/contact_solvers/contact_solver_results.h"
-#include "drake/multibody/hydroelastics/hydroelastic_engine.h"
 #include "drake/multibody/plant/contact_jacobians.h"
 #include "drake/multibody/plant/contact_results.h"
 #include "drake/multibody/plant/coulomb_friction.h"
@@ -121,6 +121,7 @@ concepts/notation.
 @system
 name: MultibodyPlant
 input_ports:
+- actuation
 - applied_generalized_force
 - applied_spatial_force
 - <em style="color:gray">model_instance_name[i]</em>_actuation
@@ -367,7 +368,6 @@ the following properties for point contact modeling:
 |  material  | point_contact_stiffness |  no²  | T | Penalty method stiffness. |
 |  material  | hunt_crossley_dissipation |  no²  | T | Penalty method dissipation. |
 
-
 ¹ Collision geometry is required to be registered with a
   geometry::ProximityProperties object that contains the
   ("material", "coulomb_friction") property. If the property
@@ -514,7 +514,7 @@ call to Finalize() must be performed. This call will:
 - declare the plant's input and output ports,
 - declare collision filters to ignore collisions:
   - between bodies connected by a joint,
-  - between bodies welded (directly or transitively) to the world.
+  - within subgraphs of welded bodies.
 
 <!-- TODO(#16422): ignore collisions within all groups of welded-together
      bodies -->
@@ -552,11 +552,10 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
   /// @ref systems::System "System" input and output ports
   /// as depicted in the MultibodyPlant class documentation.
   ///
-  /// Actuation values can be provided through a single
-  /// input port which describes the entire plant (in the case where only a
-  /// single model instance has actuated dofs), or through multiple input ports
-  /// which each provide the actuation values for a specific model instance.
-  /// See AddJointActuator() and num_actuators().
+  /// Actuation values can be provided through a single input port which
+  /// describes the entire plant, or through multiple input ports which each
+  /// provide the actuation values for a specific model instance. See
+  /// AddJointActuator() and num_actuators().
   ///
   /// Output ports provide information about the entire %MultibodyPlant
   /// or its individual model instances.
@@ -620,13 +619,14 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
   const systems::InputPort<T>& get_actuation_input_port(
       ModelInstanceIndex model_instance) const;
 
-  /// Returns a constant reference to the input port for external actuation for
-  /// the case where only one model instance has actuated dofs.  This input
-  /// port is a vector valued port, which can be set with
-  /// JointActuator::set_actuation_vector().
+  /// Returns a constant reference to the input port for external actuations for
+  /// all actuated dofs regardless the number of model instances that have
+  /// actuated dofs. The input actuation is assumed to be ordered according to
+  /// model instances. This input port is a vector valued port, which can be set
+  /// with JointActuator::set_actuation_vector().
   /// @pre Finalize() was already called on `this` plant.
-  /// @throws std::exception if called before Finalize(), if the model does not
-  /// contain any actuators, or if multiple model instances have actuated dofs.
+  /// @throws std::exception if called before Finalize().
+  /// @throws std::exception if individual actuation ports are connected.
   const systems::InputPort<T>& get_actuation_input_port() const;
 
   /// Returns a constant reference to the vector-valued input port for applied
@@ -1642,7 +1642,7 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
 
   /// Sets the contact model to be used by `this` %MultibodyPlant, see
   /// ContactModel for available options.
-  /// The default contact model is ContactModel::kPoint.
+  /// The default contact model is ContactModel::kHydroelasticWithFallback.
   /// @throws std::exception iff called post-finalize.
   void set_contact_model(ContactModel model);
 
@@ -4083,6 +4083,23 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
     return internal_tree().GetAccelerationUpperLimits();
   }
 
+  /// Returns a vector of size `num_actuators()` containing the lower effort
+  /// limits for every actuator. Any unbounded or unspecified limits will be
+  /// -infinity.
+  /// @throws std::exception if called pre-finalize.
+  VectorX<double> GetEffortLowerLimits() const {
+    DRAKE_MBP_THROW_IF_NOT_FINALIZED();
+    return internal_tree().GetEffortLowerLimits();
+  }
+
+  /// Upper limit analog of GetAccelerationsLowerLimits(), where any unbounded
+  /// or unspecified limits will be +infinity.
+  /// @see GetEffortLowerLimits() for more information.
+  VectorX<double> GetEffortUpperLimits() const {
+    DRAKE_MBP_THROW_IF_NOT_FINALIZED();
+    return internal_tree().GetEffortUpperLimits();
+  }
+
   /// Returns the model used for contact. See documentation for ContactModel.
   ContactModel get_contact_model() const;
 
@@ -4167,6 +4184,7 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
     systems::CacheIndex contact_solver_scratch;
     systems::CacheIndex discrete_contact_pairs;
     systems::CacheIndex joint_locking_data;
+    systems::CacheIndex non_contact_forces_evaluation_in_progress;
   };
 
   // Constructor to bridge testing from MultibodyTree to MultibodyPlant.
@@ -4191,37 +4209,11 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
   // MultibodyTree::Finalize() was called.
   void FinalizePlantOnly();
 
-  // MemberSceneGraph is an alias for SceneGraph<T>, except when T = Expression.
-  struct SceneGraphStub;
-  using MemberSceneGraph = typename std::conditional_t<
-      std::is_same_v<T, symbolic::Expression>,
-      SceneGraphStub, geometry::SceneGraph<T>>;
-
-  // Returns the SceneGraph that pre-Finalize geometry operations should
-  // interact with.  In most cases, that will be whatever the user has passed
-  // into RegisterAsSourceForSceneGraph.  However, when T = Expression, the
-  // result will be a stub type instead.  (We can get rid of the stub once
-  // SceneGraph supports symbolic::Expression.)
-  MemberSceneGraph& member_scene_graph();
-
   // Consolidates calls to Eval on the geometry query input port to have a
   // consistent and helpful error message in the situation where the
   // geometry_query_input_port is not connected, but is expected to be.
   const geometry::QueryObject<T>& EvalGeometryQueryInput(
-      const systems::Context<T>& context) const {
-    this->ValidateContext(context);
-    if (!get_geometry_query_input_port().HasValue(context)) {
-      throw std::logic_error(
-          "The geometry query input port (see "
-          "MultibodyPlant::get_geometry_query_input_port()) "
-          "of this MultibodyPlant is not connected. Please connect the"
-          "geometry query output port of a SceneGraph object "
-          "(see SceneGraph::get_query_output_port()) to this plants input "
-          "port in a Diagram.");
-    }
-    return get_geometry_query_input_port()
-        .template Eval<geometry::QueryObject<T>>(context);
-  }
+      const systems::Context<T>& context) const;
 
   // Helper to acquire per-geometry contact parameters from SG.
   // Returns the pair (stiffness, dissipation)
@@ -4229,46 +4221,19 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
   // isn't assigned that parameter.
   std::pair<T, T> GetPointContactParameters(
       geometry::GeometryId id,
-      const geometry::SceneGraphInspector<T>& inspector) const {
-    if constexpr (std::is_same_v<symbolic::Expression, T>) {
-      throw std::domain_error(
-          "This method doesn't support T = symbolic::Expression.");
-    }
-    const geometry::ProximityProperties* prop =
-        inspector.GetProximityProperties(id);
-    DRAKE_DEMAND(prop != nullptr);
-    return std::pair(prop->template GetPropertyOrDefault<T>(
-                         geometry::internal::kMaterialGroup,
-                         geometry::internal::kPointStiffness,
-                         penalty_method_contact_parameters_.geometry_stiffness),
-                     prop->template GetPropertyOrDefault<T>(
-                         geometry::internal::kMaterialGroup,
-                         geometry::internal::kHcDissipation,
-                         penalty_method_contact_parameters_.dissipation));
-  }
+      const geometry::SceneGraphInspector<T>& inspector) const;
 
   // Helper to acquire per-geometry Coulomb friction coefficients from
   // SceneGraph.
   const CoulombFriction<double>& GetCoulombFriction(
       geometry::GeometryId id,
-      const geometry::SceneGraphInspector<T>& inspector) const {
-    if constexpr (std::is_same_v<symbolic::Expression, T>) {
-      throw std::domain_error(
-          "This method doesn't support T = symbolic::Expression.");
-    }
-    const geometry::ProximityProperties* prop =
-        inspector.GetProximityProperties(id);
-    DRAKE_DEMAND(prop != nullptr);
-    DRAKE_THROW_UNLESS(prop->HasProperty(geometry::internal::kMaterialGroup,
-                                         geometry::internal::kFriction));
-    return prop->GetProperty<CoulombFriction<double>>(
-        geometry::internal::kMaterialGroup, geometry::internal::kFriction);
-  }
+      const geometry::SceneGraphInspector<T>& inspector) const;
 
-  // Helper method to apply collision filters based on body-adjacency. By
-  // default, we don't consider collisions between geometries affixed to
-  // bodies connected by a joint.
-  void FilterAdjacentBodies();
+  // Helper method to apply default collision filters. By default, we don't
+  // consider collisions:
+  // * between geometries affixed to bodies connected by a joint
+  // * within subgraphs of welded-together bodies
+  void ApplyDefaultCollisionFilters();
 
   // For discrete models, MultibodyPlant uses a penalty method to impose joint
   // limits. In this penalty method a force law of the form:
@@ -4328,6 +4293,20 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
   void CalcNonContactForces(const drake::systems::Context<T>& context,
                             bool discrete,
                             MultibodyForces<T>* forces) const;
+
+  // Due to issue #12786, we cannot mark the calculation of non-contact forces
+  // (and the acceleration it induces) dependent on the MultibodyPlant's inputs,
+  // as it should. However, by removing this dependency, we run the risk of an
+  // undetected algebraic loop. We use this function to guard against such
+  // algebraic loop. In particular, calling this function immediately upon
+  // entering the calculation of non-contact forces sets a flag indicating the
+  // calculation of non-contact forces is in progress. Then, this function
+  // returns a ScopeExit which turns off the flag when going out of scope at the
+  // end of the non-contact forces calculation. If this function is called again
+  // while the flag is on, it means that an algebraic loop exists and an
+  // exception is thrown.
+  [[nodiscard]] ScopeExit ThrowIfNonContactForceInProgress(
+      const systems::Context<T>& context) const;
 
   // Collects up forces from input ports (actuator, generalized, and spatial
   // forces) and contact forces (from compliant contact models). Does not
@@ -4390,7 +4369,6 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
         .template Eval<contact_solvers::internal::ContactSolverResults<T>>(
             context);
   }
-
 
   // Computes the array of indices of velocities that are not locked in the
   // current configuration. The resulting index values in @p
@@ -4934,7 +4912,7 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
   // The model used by the plant to compute contact forces. Keep this in sync
   // with the default value in multibody_plant_config.h; there are already
   // assertions in the cc file that enforce this.
-  ContactModel contact_model_{ContactModel::kPoint};
+  ContactModel contact_model_{ContactModel::kHydroelasticWithFallback};
 
   // User's choice of the representation of contact surfaces in discrete
   // systems. The default value is dependent on whether the system is
@@ -4960,9 +4938,8 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
   // if that instance has no actuators.
   std::vector<systems::InputPortIndex> instance_actuation_ports_;
 
-  // If only one model instance has actuated dofs, remember it here.  If
-  // multiple instances have actuated dofs, this index will not be valid.
-  ModelInstanceIndex actuated_instance_;
+  // The actuation port for all actuated dofs.
+  systems::InputPortIndex actuation_port_;
 
   // A port for externally applied generalized forces u.
   systems::InputPortIndex applied_generalized_force_input_port_;
@@ -5027,8 +5004,6 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
   // (Experimental) The vector of physical models owned by MultibodyPlant.
   std::vector<std::unique_ptr<internal::PhysicalModel<T>>> physical_models_;
 
-  hydroelastics::internal::HydroelasticEngine<T> hydroelastics_engine_;
-
   // All MultibodyPlant cache indexes are stored in cache_indexes_.
   CacheIndexes cache_indexes_;
 
@@ -5069,7 +5044,7 @@ struct AddMultibodyPlantSceneGraphResult;
 ///   used.
 /// @return Pair of the registered plant and scene graph.
 /// @pre `builder` must be non-null.
-/// @tparam_nonsymbolic_scalar
+/// @tparam_default_scalar
 /// @relates MultibodyPlant
 template <typename T>
 AddMultibodyPlantSceneGraphResult<T>
@@ -5092,7 +5067,7 @@ AddMultibodyPlantSceneGraph(
 ///   used.
 /// @return Pair of the registered plant and scene graph.
 /// @pre `builder` and `plant` must be non-null.
-/// @tparam_nonsymbolic_scalar
+/// @tparam_default_scalar
 /// @relates MultibodyPlant
 template <typename T>
 AddMultibodyPlantSceneGraphResult<T>
@@ -5182,19 +5157,6 @@ std::pair<T, T> CombinePointContactParameters(const T& k1, const T& k2,
 #ifndef DRAKE_DOXYGEN_CXX
 // Forward-declare specializations, prior to DRAKE_DECLARE... below.
 // See the .cc file for an explanation why we specialize these methods.
-template <>
-typename MultibodyPlant<symbolic::Expression>::SceneGraphStub&
-MultibodyPlant<symbolic::Expression>::member_scene_graph();
-template <>
-void MultibodyPlant<symbolic::Expression>::CalcPointPairPenetrations(
-    const systems::Context<symbolic::Expression>&,
-    std::vector<geometry::PenetrationAsPointPair<symbolic::Expression>>*) const;
-template <>
-std::vector<CoulombFriction<double>>
-MultibodyPlant<symbolic::Expression>::CalcCombinedFrictionCoefficients(
-    const drake::systems::Context<symbolic::Expression>&,
-    const std::vector<internal::DiscreteContactPair<symbolic::Expression>>&)
-    const;
 template <>
 void MultibodyPlant<symbolic::Expression>::CalcHydroelasticContactForces(
     const systems::Context<symbolic::Expression>&,

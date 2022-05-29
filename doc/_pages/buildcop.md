@@ -140,6 +140,30 @@ color of the previous build.
 
 Note that CDash pages may take a minute to populate.
 
+In addition, check the [automatically generated documentation repo](https://github.com/RobotLocomotion/RobotLocomotion.github.io/commits/master)
+to confirm that the latest commit has a green circle, not a red x.
+
+## Monitor the Cache Servers
+
+Check once per week that caching is still enabled, by opening one Mac and
+one Ubuntu (non-unprovisioned)
+[Continuous Production](https://drake-jenkins.csail.mit.edu/view/Continuous%20Production/)
+build log and searching for one of two messages:
+
+Message indicating a problem:
+
+``REMOTE_CACHE_KEY =``
+
+Message indicating success:
+
+``REMOTE_CACHE_KEY = 3a677c9194643f253d3eb3fcd6b09ee370f663da30bf1f43fb547edc6851e339``
+
+The exact key hash is not important, it's just important that it's non-empty.
+
+If there is an issue with either cache server, post the details on the
+[#buildcop](https://drakedevelopers.slack.com/messages/buildcop/details/)
+channel on Slack, ensuring that `@betsymcphail` is mentioned in the message.
+
 ## Respond to Breakage
 
 There are various reasons the build might break. Diagnose the failure, and
@@ -264,3 +288,8 @@ Details of failures in the [drake-external-examples](https://github.com/RobotLoc
 repository, which may be denoted by red "build failing" icons at the top of the build
 dashboard on Jenkins, should be posted to the [#buildcop](https://drakedevelopers.slack.com/messages/buildcop/details/)
 channel on Slack, ensuring that `@betsymcphail` is mentioned in the message.
+
+## Documentation Repo Failures
+If the [automatically generated documentation repo](https://github.com/RobotLocomotion/RobotLocomotion.github.io/commits/master)
+fails, post in [DrakeDevelopers Slack channel #buildcop](https://drakedevelopers.slack.com/messages/buildcop/details/),
+and try to locate the offensive Drake commit. Each commit in the documentation repo is associated with a matching Drake commit.

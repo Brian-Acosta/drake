@@ -81,7 +81,9 @@ class GeometryStateValue final : public Value<GeometryState<T>> {
 
 template <typename T>
 SceneGraph<T>::SceneGraph()
-    : LeafSystem<T>(SystemTypeTag<SceneGraph>{}) {
+    : LeafSystem<T>(SystemTypeTag<SceneGraph>{}),
+      owned_model_(std::make_unique<GeometryState<T>>()),
+      model_(*owned_model_) {
   model_inspector_.set(&model_);
   geometry_state_index_ =
       this->DeclareAbstractParameter(GeometryStateValue<T>());
@@ -127,6 +129,9 @@ SceneGraph<T>::SceneGraph(const SceneGraph<U>& other)
     DRAKE_DEMAND(new_ports.pose_port == ref_ports.pose_port);
   }
 }
+
+template <typename T>
+SceneGraph<T>::~SceneGraph() = default;
 
 template <typename T>
 SourceId SceneGraph<T>::RegisterSource(const std::string& name) {
@@ -195,6 +200,23 @@ template <typename T>
 GeometryId SceneGraph<T>::RegisterAnchoredGeometry(
     SourceId source_id, std::unique_ptr<GeometryInstance> geometry) {
   return model_.RegisterAnchoredGeometry(source_id, std::move(geometry));
+}
+
+template <typename T>
+GeometryId SceneGraph<T>::RegisterDeformableGeometry(
+    SourceId source_id, FrameId frame_id,
+    std::unique_ptr<GeometryInstance> geometry, double resolution_hint) {
+  return model_.RegisterDeformableGeometry(
+      source_id, frame_id, std::move(geometry), resolution_hint);
+}
+
+template <typename T>
+GeometryId SceneGraph<T>::RegisterDeformableGeometry(
+    Context<T>* context, SourceId source_id, FrameId frame_id,
+    std::unique_ptr<GeometryInstance> geometry, double resolution_hint) const {
+  auto& g_state = mutable_geometry_state(context);
+  return g_state.RegisterDeformableGeometry(
+      source_id, frame_id, std::move(geometry), resolution_hint);
 }
 
 template <typename T>

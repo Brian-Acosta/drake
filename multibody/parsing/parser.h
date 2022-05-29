@@ -3,13 +3,17 @@
 #include <string>
 #include <vector>
 
-#include "drake/geometry/scene_graph.h"
+#include "drake/common/diagnostic_policy.h"
 #include "drake/multibody/parsing/package_map.h"
 #include "drake/multibody/plant/multibody_plant.h"
 #include "drake/multibody/tree/multibody_tree_indexes.h"
 
 namespace drake {
 namespace multibody {
+
+namespace internal {
+class CompositeParse;
+}  // namespace internal
 
 /// Parses SDF and URDF input files into a MultibodyPlant and (optionally) a
 /// SceneGraph. For documentation of Drake-specific extensions and limitations,
@@ -31,8 +35,16 @@ class Parser final {
     MultibodyPlant<double>* plant,
     geometry::SceneGraph<double>* scene_graph = nullptr);
 
+  /// Gets a mutable reference to the plant that will be modified by this
+  /// parser.
+  MultibodyPlant<double>& plant() { return *plant_; }
+
   /// Gets a mutable reference to the PackageMap used by this parser.
   PackageMap& package_map() { return package_map_; }
+
+  /// Cause all subsequent Add*Model*() operations to use strict parsing;
+  /// warnings will be treated as errors.
+  void SetStrictParsing() { is_strict_ = true; }
 
   /// Parses the SDF or URDF file named in @p file_name and adds all of its
   /// model(s) to @p plant.
@@ -88,9 +100,27 @@ class Parser final {
       const std::string& model_name = {});
 
  private:
+  friend class internal::CompositeParse;
+
+  std::vector<ModelInstanceIndex> CompositeAddAllModelsFromFile(
+      const std::string& file_name,
+      internal::CompositeParse* composite);
+
+  ModelInstanceIndex CompositeAddModelFromFile(
+      const std::string& file_name,
+      const std::string& model_name,
+      internal::CompositeParse* composite);
+
+  ModelInstanceIndex CompositeAddModelFromString(
+      const std::string& file_contents,
+      const std::string& file_type,
+      const std::string& model_name,
+      internal::CompositeParse* composite);
+
+  bool is_strict_{false};
   PackageMap package_map_;
+  drake::internal::DiagnosticPolicy diagnostic_policy_;
   MultibodyPlant<double>* const plant_;
-  geometry::SceneGraph<double>* const scene_graph_;
 };
 
 }  // namespace multibody

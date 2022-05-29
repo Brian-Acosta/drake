@@ -14,6 +14,7 @@
 #include "drake/geometry/frame_kinematics_vector.h"
 #include "drake/geometry/geometry_frame.h"
 #include "drake/geometry/geometry_instance.h"
+#include "drake/geometry/proximity_properties.h"
 #include "drake/geometry/rgba.h"
 #include "drake/geometry/scene_graph.h"
 #include "drake/geometry/shape_specification.h"
@@ -199,11 +200,11 @@ class DrakeVisualizerTest : public ::testing::Test {
   ::testing::AssertionResult ExpectedMessageCount(int num_load, int num_draw) {
     MessageResults results = ProcessMessages();
     if (results.num_draw != num_draw || results.num_load != num_load) {
-      ::testing::AssertionFailure()
-          << "Expected " << num_load << " load messages and " << num_draw
-          << " draw messages"
-          << "\nFound   " << results.num_load << " load messages and "
-          << results.num_draw << " draw messages";
+      return ::testing::AssertionFailure()
+             << "Expected " << num_load << " load messages and " << num_draw
+             << " draw messages"
+             << "\nFound   " << results.num_load << " load messages and "
+             << results.num_draw << " draw messages";
     }
     return ::testing::AssertionSuccess();
   }

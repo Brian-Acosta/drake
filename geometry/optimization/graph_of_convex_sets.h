@@ -14,6 +14,8 @@
 #include "drake/common/symbolic.h"
 #include "drake/geometry/optimization/convex_set.h"
 #include "drake/solvers/mathematical_program_result.h"
+#include "drake/solvers/solver_interface.h"
+#include "drake/solvers/solver_options.h"
 
 namespace drake {
 namespace geometry {
@@ -83,7 +85,12 @@ class GraphOfConvexSets {
     /** Returns a const reference to the underlying ConvexSet. */
     const ConvexSet& set() const { return *set_; }
 
-    /** Returns the solution of x() in a MathematicalProgramResult. */
+    /** Returns the solution of x() in a MathematicalProgramResult.  This
+    solution is NaN if the vertex is not in the shortest path (or if we are
+    solving the the convex relaxation and the total flow through this vertex at
+    the solution is numerically close to zero).  We prefer to return NaN than a
+    value not contained in set().
+    */
     Eigen::VectorXd GetSolution(
         const solvers::MathematicalProgramResult& result) const;
 
@@ -149,6 +156,9 @@ class GraphOfConvexSets {
     @verbatim
     min g(xu, xv) ⇒ min ℓ, s.t. ℓ ≥ g(xu,xv)
     @endverbatim
+    @note Linear costs lead to negative costs if decision variables are not
+    properly constrained. Users may want to check that the solution does not
+    contain negative costs.
     @returns the pair <ℓ, Binding<Cost>>.
     @throws std::exception if e.GetVariables() is not a subset of xu() ∪ xv().
     @pydrake_mkdoc_identifier{expression}
@@ -163,6 +173,9 @@ class GraphOfConvexSets {
     @verbatim
     min g(xu, xv) ⇒ min ℓ, s.t. ℓ ≥ g(xu,xv)
     @endverbatim
+    @note Linear costs lead to negative costs if decision variables are not
+    properly constrained. Users may want to check that the solution does not
+    contain negative costs.
     @returns the pair <ℓ, Binding<Cost>>.
     @throws std::exception if binding.variables() is not a subset of xu() ∪
     xv().
@@ -197,6 +210,17 @@ class GraphOfConvexSets {
 
     /** Removes any constraints added with AddPhiConstraint. */
     void ClearPhiConstraints();
+
+    /** Returns all costs on this edge. */
+    const std::vector<solvers::Binding<solvers::Cost>>& GetCosts() const {
+      return costs_;
+    }
+
+    /** Returns all constraints on this edge. */
+    const std::vector<solvers::Binding<solvers::Constraint>>& GetConstraints()
+        const {
+      return constraints_;
+    }
 
     /** Returns the sum of the costs associated with this edge in a
     solvers::MathematicalProgramResult. */
@@ -317,7 +341,6 @@ class GraphOfConvexSets {
       bool show_slacks = true, int precision = 3,
       bool scientific = false) const;
 
-  // TODO(russt): Consider adding optional<Solver> argument.
   /** Formulates and solves the mixed-integer convex formulation of the
   shortest path problem on the graph, as discussed in detail in
 
@@ -333,15 +356,24 @@ class GraphOfConvexSets {
   discussed in the paper, we know that this relaxation cannot solve the original
   NP-hard problem for all instances, but there are also many instances for which
   the convex relaxation is tight.
+  @param solver provides the optimizer to be used to solve the shortest path
+  optimization problem. If not set, the best solver for the given problem is
+  selected. Note that if the solver cannot handle the type of optimization
+  problem generated, it will throw.
+  @param solver_options are passed to the solver once the problem is generated
+  to set the solver settings.
 
   @throws std::exception if any of the costs or constraints in the graph are
   incompatible with the shortest path formulation or otherwise unsupported.
   All costs must be non-negative (for all values of the continuous variables).
+
   @pydrake_mkdoc_identifier{by_id}
   */
   solvers::MathematicalProgramResult SolveShortestPath(
-      VertexId source_id, VertexId target_id,
-      bool convex_relaxation = false) const;
+      VertexId source_id, VertexId target_id, bool convex_relaxation = false,
+      const solvers::SolverInterface* solver = nullptr,
+      const std::optional<solvers::SolverOptions>& solver_options =
+          std::nullopt) const;
 
   /** Convenience overload that takes const reference arguments for source and
   target.
@@ -349,7 +381,10 @@ class GraphOfConvexSets {
   */
   solvers::MathematicalProgramResult SolveShortestPath(
       const Vertex& source, const Vertex& target,
-      bool convex_relaxation = false) const;
+      bool convex_relaxation = false,
+      const solvers::SolverInterface* solver = nullptr,
+      const std::optional<solvers::SolverOptions>& solver_options =
+          std::nullopt) const;
 
  private:
   std::map<VertexId, std::unique_ptr<Vertex>> vertices_{};

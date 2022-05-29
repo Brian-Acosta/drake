@@ -15,11 +15,13 @@
 #include "drake/geometry/geometry_frame.h"
 #include "drake/geometry/geometry_instance.h"
 #include "drake/geometry/geometry_roles.h"
+#include "drake/geometry/proximity_properties.h"
 #include "drake/geometry/query_results/contact_surface.h"
 #include "drake/geometry/render/render_label.h"
 #include "drake/math/random_rotation.h"
 #include "drake/math/rotation_matrix.h"
 #include "drake/multibody/contact_solvers/sparse_linear_operator.h"
+#include "drake/multibody/hydroelastics/hydroelastic_engine.h"
 #include "drake/multibody/plant/discrete_contact_pair.h"
 #include "drake/multibody/plant/externally_applied_spatial_force.h"
 #include "drake/multibody/plant/hydroelastic_traction_calculator.h"
@@ -359,8 +361,9 @@ template <typename T>
 MultibodyPlant<T>::MultibodyPlant(double time_step)
     : MultibodyPlant(nullptr, time_step) {
   // Cross-check that the Config default matches our header file default.
-  DRAKE_DEMAND(contact_model_ == ContactModel::kPoint);
-  DRAKE_DEMAND(MultibodyPlantConfig{}.contact_model == "point");
+  DRAKE_DEMAND(contact_model_ == ContactModel::kHydroelasticWithFallback);
+  DRAKE_DEMAND(MultibodyPlantConfig{}.contact_model ==
+               "hydroelastic_with_fallback");
 }
 
 template <typename T>
@@ -452,9 +455,8 @@ geometry::SourceId MultibodyPlant<T>::RegisterAsSourceForSceneGraph(
   // Save the GS pointer so that on later geometry registrations can use this
   // instance. This will be nullified at Finalize().
   scene_graph_ = scene_graph;
-  source_id_ = member_scene_graph().RegisterSource(this->get_name());
-  const geometry::FrameId world_frame_id =
-      member_scene_graph().world_frame_id();
+  source_id_ = scene_graph_->RegisterSource(this->get_name());
+  const geometry::FrameId world_frame_id = scene_graph_->world_frame_id();
   body_index_to_frame_id_[world_index()] = world_frame_id;
   frame_id_to_body_index_[world_frame_id] = world_index();
   // In case any bodies were added before registering scene graph, make sure the
@@ -500,7 +502,7 @@ geometry::GeometryId MultibodyPlant<T>::RegisterVisualGeometry(
   GeometryId id =
       RegisterGeometry(body, X_BG, shape,
                        GetScopedName(*this, body.model_instance(), name));
-  member_scene_graph().AssignRole(*source_id_, id, properties);
+  scene_graph_->AssignRole(*source_id_, id, properties);
 
   // TODO(SeanCurtis-TRI): Eliminate the automatic assignment of perception
   //  and illustration in favor of a protocol that allows definition.
@@ -520,7 +522,7 @@ geometry::GeometryId MultibodyPlant<T>::RegisterVisualGeometry(
       "renderer", "accepting",
       properties.GetProperty<std::set<std::string>>("renderer", "accepting"));
   }
-  member_scene_graph().AssignRole(*source_id_, id, perception_props);
+  scene_graph_->AssignRole(*source_id_, id, perception_props);
 
   DRAKE_ASSERT(static_cast<int>(visual_geometries_.size()) == num_bodies());
   visual_geometries_[body.index()].push_back(id);
@@ -550,7 +552,7 @@ geometry::GeometryId MultibodyPlant<T>::RegisterCollisionGeometry(
   GeometryId id = RegisterGeometry(
       body, X_BG, shape, GetScopedName(*this, body.model_instance(), name));
 
-  member_scene_graph().AssignRole(*source_id_, id, std::move(properties));
+  scene_graph_->AssignRole(*source_id_, id, std::move(properties));
   DRAKE_ASSERT(static_cast<int>(collision_geometries_.size()) == num_bodies());
   collision_geometries_[body.index()].push_back(id);
   ++num_collision_geometries_;
@@ -626,7 +628,7 @@ geometry::GeometryId MultibodyPlant<T>::RegisterGeometry(
   // Register geometry in the body frame.
   std::unique_ptr<geometry::GeometryInstance> geometry_instance =
       std::make_unique<GeometryInstance>(X_BG, shape.Clone(), name);
-  GeometryId geometry_id = member_scene_graph().RegisterGeometry(
+  GeometryId geometry_id = scene_graph_->RegisterGeometry(
       source_id_.value(), body_index_to_frame_id_[body.index()],
       std::move(geometry_instance));
   geometry_id_to_body_index_[geometry_id] = body.index();
@@ -650,7 +652,7 @@ void MultibodyPlant<T>::RegisterRigidBodyWithSceneGraph(
   if (geometry_source_is_registered()) {
     // If not already done, register a frame for this body.
     if (!body_has_registered_frame(body)) {
-      FrameId frame_id = member_scene_graph().RegisterFrame(
+      FrameId frame_id = scene_graph_->RegisterFrame(
           source_id_.value(),
           GeometryFrame(
               GetScopedName(*this, body.model_instance(), body.name()),
@@ -736,7 +738,7 @@ void MultibodyPlant<T>::Finalize() {
   // After finalizing the base class, tree is read-only.
   internal::MultibodyTreeSystem<T>::Finalize();
   if (geometry_source_is_registered()) {
-    FilterAdjacentBodies();
+    ApplyDefaultCollisionFilters();
     ExcludeCollisionsWithVisualGeometry();
   }
   FinalizePlantOnly();
@@ -856,71 +858,54 @@ MatrixX<T> MultibodyPlant<T>::MakeActuationMatrix() const {
 }
 
 template <typename T>
-struct MultibodyPlant<T>::SceneGraphStub {
-  struct StubSceneGraphInspector {
-    const geometry::ProximityProperties* GetProximityProperties(
-        GeometryId) const {
-      return nullptr;
-    }
-    const geometry::IllustrationProperties* GetIllustrationProperties(
-        GeometryId) const {
-      return nullptr;
-    }
-  };
-
-  struct StubCollisionFilterManager {
-    void Apply(const geometry::CollisionFilterDeclaration&) {
-      return;
-    }
-  };
-
-  static void Throw(const char* operation_name) {
-    throw std::logic_error(fmt::format(
-        "Cannot {} on a SceneGraph<symbolic::Expression>", operation_name));
+const geometry::QueryObject<T>& MultibodyPlant<T>::EvalGeometryQueryInput(
+    const systems::Context<T>& context) const {
+  this->ValidateContext(context);
+  if (!get_geometry_query_input_port().HasValue(context)) {
+    throw std::logic_error(
+        "The geometry query input port (see "
+        "MultibodyPlant::get_geometry_query_input_port()) "
+        "of this MultibodyPlant is not connected. Please connect the"
+        "geometry query output port of a SceneGraph object "
+        "(see SceneGraph::get_query_output_port()) to this plants input "
+        "port in a Diagram.");
   }
-
-  static FrameId world_frame_id() {
-    return SceneGraph<double>::world_frame_id();
-  }
-
-#define DRAKE_STUB(Ret, Name)                   \
-  template <typename... Args>                   \
-  Ret Name(Args...) const { Throw(#Name); return Ret(); }
-
-  DRAKE_STUB(void, AssignRole)
-  DRAKE_STUB(FrameId, RegisterFrame)
-  DRAKE_STUB(GeometryId, RegisterGeometry)
-  DRAKE_STUB(SourceId, RegisterSource)
-  const StubSceneGraphInspector model_inspector() const {
-    Throw("model_inspector");
-    return StubSceneGraphInspector();
-  }
-  StubCollisionFilterManager collision_filter_manager() {
-    Throw("collision_filter_manager");
-    return StubCollisionFilterManager();
-  }
-
-#undef DRAKE_STUB
-};
-
-template <typename T>
-typename MultibodyPlant<T>::MemberSceneGraph&
-MultibodyPlant<T>::member_scene_graph() {
-  DRAKE_THROW_UNLESS(scene_graph_ != nullptr);
-  return *scene_graph_;
-}
-
-// Specialize this function so that we can use our Stub class; we cannot call
-// methods on SceneGraph<Expression> because they do not exist.
-template <>
-typename MultibodyPlant<symbolic::Expression>::MemberSceneGraph&
-MultibodyPlant<symbolic::Expression>::member_scene_graph() {
-  static never_destroyed<SceneGraphStub> stub_;
-  return stub_.access();
+  return get_geometry_query_input_port()
+      .template Eval<geometry::QueryObject<T>>(context);
 }
 
 template <typename T>
-void MultibodyPlant<T>::FilterAdjacentBodies() {
+std::pair<T, T> MultibodyPlant<T>::GetPointContactParameters(
+    geometry::GeometryId id,
+    const geometry::SceneGraphInspector<T>& inspector) const {
+  const geometry::ProximityProperties* prop =
+      inspector.GetProximityProperties(id);
+  DRAKE_DEMAND(prop != nullptr);
+  return std::pair(prop->template GetPropertyOrDefault<T>(
+                       geometry::internal::kMaterialGroup,
+                       geometry::internal::kPointStiffness,
+                       penalty_method_contact_parameters_.geometry_stiffness),
+                   prop->template GetPropertyOrDefault<T>(
+                       geometry::internal::kMaterialGroup,
+                       geometry::internal::kHcDissipation,
+                       penalty_method_contact_parameters_.dissipation));
+}
+
+template <typename T>
+const CoulombFriction<double>& MultibodyPlant<T>::GetCoulombFriction(
+    geometry::GeometryId id,
+    const geometry::SceneGraphInspector<T>& inspector) const {
+  const geometry::ProximityProperties* prop =
+      inspector.GetProximityProperties(id);
+  DRAKE_DEMAND(prop != nullptr);
+  DRAKE_THROW_UNLESS(prop->HasProperty(geometry::internal::kMaterialGroup,
+                                       geometry::internal::kFriction));
+  return prop->GetProperty<CoulombFriction<double>>(
+      geometry::internal::kMaterialGroup, geometry::internal::kFriction);
+}
+
+template <typename T>
+void MultibodyPlant<T>::ApplyDefaultCollisionFilters() {
   DRAKE_DEMAND(geometry_source_is_registered());
   // Disallow collisions between adjacent bodies. Adjacency is implied by the
   // existence of a joint between bodies.
@@ -933,18 +918,27 @@ void MultibodyPlant<T>::FilterAdjacentBodies() {
     std::optional<FrameId> parent_id = GetBodyFrameIdIfExists(parent.index());
 
     if (child_id && parent_id) {
-      member_scene_graph().collision_filter_manager().Apply(
+      scene_graph_->collision_filter_manager().Apply(
         CollisionFilterDeclaration().ExcludeBetween(
           geometry::GeometrySet(*child_id),
           geometry::GeometrySet(*parent_id)));
     }
   }
-  // We must explicitly exclude collisions between all geometries registered
-  // against the world.
-  // TODO(eric.cousineau): Do this in a better fashion (#11117).
-  auto g_world = CollectRegisteredGeometries(GetBodiesWeldedTo(world_body()));
-  member_scene_graph().collision_filter_manager().Apply(
-      CollisionFilterDeclaration().ExcludeWithin(g_world));
+  // We explicitly exclude collisions within welded subgraphs.
+  std::vector<std::set<BodyIndex>> subgraphs =
+      multibody_graph_.FindSubgraphsOfWeldedBodies();
+  for (const auto& subgraph : subgraphs) {
+    // Only operate on non-trivial weld subgraphs.
+    if (subgraph.size() <= 1) { continue; }
+    // Map body indices to pointers.
+    std::vector<const Body<T>*> subgraph_bodies;
+    for (BodyIndex body_index : subgraph) {
+      subgraph_bodies.push_back(&get_body(body_index));
+    }
+    auto geometries = CollectRegisteredGeometries(subgraph_bodies);
+    scene_graph_->collision_filter_manager().Apply(
+        CollisionFilterDeclaration().ExcludeWithin(geometries));
+  }
 }
 
 template <typename T>
@@ -959,7 +953,7 @@ void MultibodyPlant<T>::ExcludeCollisionsWithVisualGeometry() {
     collision.Add(body_geometries);
   }
   // clang-format off
-  member_scene_graph().collision_filter_manager().Apply(
+  scene_graph_->collision_filter_manager().Apply(
       CollisionFilterDeclaration()
           .ExcludeWithin(visual)
           .ExcludeBetween(visual, collision));
@@ -976,11 +970,11 @@ void MultibodyPlant<T>::ExcludeCollisionGeometriesWithCollisionFilterGroupPair(
   DRAKE_DEMAND(geometry_source_is_registered());
 
   if (collision_filter_group_a.first == collision_filter_group_b.first) {
-    member_scene_graph().collision_filter_manager().Apply(
+    scene_graph_->collision_filter_manager().Apply(
         CollisionFilterDeclaration().ExcludeWithin(
             collision_filter_group_a.second));
   } else {
-    member_scene_graph().collision_filter_manager().Apply(
+    scene_graph_->collision_filter_manager().Apply(
         CollisionFilterDeclaration().ExcludeBetween(
             collision_filter_group_a.second, collision_filter_group_b.second));
   }
@@ -1259,25 +1253,6 @@ void MultibodyPlant<T>::CalcPointPairPenetrations(
   } else {
     output->clear();
   }
-}
-
-// Specialize this function so that symbolic::Expression throws an error.
-template <>
-void MultibodyPlant<symbolic::Expression>::CalcPointPairPenetrations(
-    const systems::Context<symbolic::Expression>&,
-    std::vector<PenetrationAsPointPair<symbolic::Expression>>*) const {
-  throw std::logic_error(
-      "This method doesn't support T = symbolic::Expression.");
-}
-
-template <>
-std::vector<CoulombFriction<double>>
-MultibodyPlant<symbolic::Expression>::CalcCombinedFrictionCoefficients(
-    const drake::systems::Context<symbolic::Expression>&,
-    const std::vector<internal::DiscreteContactPair<symbolic::Expression>>&)
-    const {
-  throw std::logic_error(
-      "This method doesn't support T = symbolic::Expression.");
 }
 
 template<typename T>
@@ -1747,7 +1722,8 @@ void MultibodyPlant<T>::CalcHydroelasticContactForces(
         X_WA, X_WB, V_WA, V_WB, &surface);
 
     // Combined Hunt & Crossley dissipation.
-    const double dissipation = hydroelastics_engine_.CalcCombinedDissipation(
+    const hydroelastics::internal::HydroelasticEngine<T> hydroelastics_engine;
+    const double dissipation = hydroelastics_engine.CalcCombinedDissipation(
         geometryM_id, geometryN_id, inspector);
 
     // Integrate the hydroelastic traction field over the contact surface.
@@ -1792,8 +1768,13 @@ void MultibodyPlant<T>::AddAppliedExternalGeneralizedForces(
   const InputPort<T>& applied_generalized_force_input =
       this->get_input_port(applied_generalized_force_input_port_);
   if (applied_generalized_force_input.HasValue(context)) {
-    forces->mutable_generalized_forces() +=
+    const VectorX<T>& applied_generalized_force =
         applied_generalized_force_input.Eval(context);
+    if (applied_generalized_force.hasNaN()) {
+      throw std::runtime_error(
+          "Detected NaN in applied generalized force input port.");
+    }
+    forces->mutable_generalized_forces() += applied_generalized_force;
   }
 }
 
@@ -1812,8 +1793,21 @@ void MultibodyPlant<T>::AddAppliedExternalSpatialForces(
   if (!applied_input)
     return;
 
+  // Helper to throw a useful message if the input contains NaN.
+  auto throw_if_contains_nan = [this](const ExternallyAppliedSpatialForce<T>&
+                                          external_spatial_force) {
+    const SpatialForce<T>& spatial_force = external_spatial_force.F_Bq_W;
+    if (external_spatial_force.p_BoBq_B.hasNaN() ||
+        spatial_force.rotational().hasNaN() ||
+        spatial_force.translational().hasNaN()) {
+      throw std::runtime_error(fmt::format(
+          "Spatial force applied on body {} contains NaN.",
+          internal_tree().get_body(external_spatial_force.body_index).name()));
+    }
+  };
   // Loop over all forces.
   for (const auto& force_structure : *applied_input) {
+    throw_if_contains_nan(force_structure);
     const BodyIndex body_index = force_structure.body_index;
     const Body<T>& body = get_body(body_index);
     const auto body_node_index = body.node_index();
@@ -1905,26 +1899,59 @@ VectorX<T> MultibodyPlant<T>::AssembleActuationInput(
   this->ValidateContext(context);
   // Assemble the vector from the model instance input ports.
   VectorX<T> actuation_input(num_actuated_dofs());
-  int u_offset = 0;
-  for (ModelInstanceIndex model_instance_index(0);
-       model_instance_index < num_model_instances(); ++model_instance_index) {
-    // Ignore the port if the model instance has no actuated DoFs.
-    const int instance_num_dofs = num_actuated_dofs(model_instance_index);
-    if (instance_num_dofs == 0) continue;
 
-    const auto& input_port = this->get_input_port(
-        instance_actuation_ports_[model_instance_index]);
-    if (!input_port.HasValue(context)) {
+  const auto& actuation_port = this->get_input_port(actuation_port_);
+  const ModelInstanceIndex first_non_world_index(1);
+  if (actuation_port.HasValue(context)) {
+    // The port for all instances and the actuation ports for individual
+    // instances should not be connected at the same time.
+    for (ModelInstanceIndex model_instance_index(first_non_world_index);
+         model_instance_index < num_model_instances(); ++model_instance_index) {
+      const auto& per_instance_actuation_port =
+          this->get_input_port(instance_actuation_ports_[model_instance_index]);
+      if (per_instance_actuation_port.HasValue(context)) {
+        throw std::logic_error(fmt::format(
+            "Actuation input port for model instance {} and the "
+            "actuation port for all instances are both connected. At most "
+            "one of these ports should be connected.",
+            GetModelInstanceName(model_instance_index)));
+      }
+    }
+    // TODO(xuchenhan-tri): It'd be nice to avoid the copy here.
+    actuation_input = actuation_port.Eval(context);
+    if (actuation_input.hasNaN()) {
+      throw std::runtime_error(
+          "Detected NaN in the actuation input port for all instances.");
+    }
+    DRAKE_ASSERT(actuation_input.size() == num_actuated_dofs());
+  } else {
+    int u_offset = 0;
+    for (ModelInstanceIndex model_instance_index(first_non_world_index);
+         model_instance_index < num_model_instances(); ++model_instance_index) {
+      // Ignore the port if the model instance has no actuated DoFs.
+      const int instance_num_dofs = num_actuated_dofs(model_instance_index);
+      if (instance_num_dofs == 0) continue;
+
+      const auto& input_port =
+          this->get_input_port(instance_actuation_ports_[model_instance_index]);
+      if (!input_port.HasValue(context)) {
         throw std::logic_error(fmt::format("Actuation input port for model "
             "instance {} must be connected.",
             GetModelInstanceName(model_instance_index)));
-    }
+      }
+      const auto& u_instance = input_port.Eval(context);
 
-    const auto& u_instance = input_port.Eval(context);
-    actuation_input.segment(u_offset, instance_num_dofs) = u_instance;
-    u_offset += instance_num_dofs;
+      if (u_instance.hasNaN()) {
+        throw std::runtime_error(
+            fmt::format("Actuation input port for model "
+                        "instance {} contains NaN.",
+                        GetModelInstanceName(model_instance_index)));
+      }
+      actuation_input.segment(u_offset, instance_num_dofs) = u_instance;
+      u_offset += instance_num_dofs;
+    }
+    DRAKE_ASSERT(u_offset == num_actuated_dofs());
   }
-  DRAKE_ASSERT(u_offset == num_actuated_dofs());
   return actuation_input;
 }
 
@@ -2120,7 +2147,9 @@ void MultibodyPlant<T>::CalcDiscreteContactPairs(
         DRAKE_DEMAND(M_is_compliant || N_is_compliant);
 
         // Combined Hunt & Crossley dissipation.
-        const T dissipation = hydroelastics_engine_.CalcCombinedDissipation(
+        const hydroelastics::internal::HydroelasticEngine<T>
+            hydroelastics_engine;
+        const T dissipation = hydroelastics_engine.CalcCombinedDissipation(
             s.id_M(), s.id_N(), inspector);
 
         for (int face = 0; face < s.num_faces(); ++face) {
@@ -2395,37 +2424,32 @@ void MultibodyPlant<T>::CalcJointLockingIndices(
   auto& indices = *unlocked_velocity_indices;
   indices.resize(num_velocities());
 
-  int velocity_cursor = 0;
   int unlocked_cursor = 0;
   for (JointIndex joint_index(0); joint_index < num_joints(); ++joint_index) {
     const Joint<T>& joint = get_joint(joint_index);
-    if (joint.is_locked(context)) {
-      velocity_cursor += joint.num_velocities();
-    } else {
+    if (!joint.is_locked(context)) {
       for (int k = 0; k < joint.num_velocities(); ++k) {
-        indices[unlocked_cursor++] = velocity_cursor++;
+        indices[unlocked_cursor++] = joint.velocity_start() + k;
       }
     }
   }
 
   for (BodyIndex body_index(1); body_index < num_bodies(); ++body_index) {
     const Body<T>& body = get_body(body_index);
-    if (!body.is_floating()) {
-      continue;
-    }
-    if (body.is_locked(context)) {
-      velocity_cursor += 6;
-    } else {
+    if (body.is_floating() && !body.is_locked(context)) {
       for (int k = 0; k < 6; ++k) {
-        indices[unlocked_cursor++] = velocity_cursor++;
+        indices[unlocked_cursor++] =
+            body.floating_velocities_start() - num_positions() + k;
       }
     }
   }
-  DRAKE_ASSERT(velocity_cursor == num_velocities());
   DRAKE_ASSERT(unlocked_cursor <= num_velocities());
 
   // Use size to indicate exactly how many velocities are unlocked.
   indices.resize(unlocked_cursor);
+  // Sort the unlocked indices to keep the original DOF ordering established by
+  // the plant stable.
+  std::sort(indices.begin(), indices.end());
   DemandIndicesValid(indices, num_velocities());
   DRAKE_DEMAND(static_cast<int>(indices.size()) == unlocked_cursor);
 }
@@ -2686,6 +2710,8 @@ void MultibodyPlant<T>::CalcNonContactForces(
   DRAKE_DEMAND(forces != nullptr);
   DRAKE_DEMAND(forces->CheckHasRightSizeForModel(*this));
 
+  const ScopeExit guard = ThrowIfNonContactForceInProgress(context);
+
   // Compute forces applied through force elements. Note that this resets
   // forces to empty so must come first.
   CalcForceElementsContribution(context, forces);
@@ -2702,6 +2728,41 @@ void MultibodyPlant<T>::CalcNonContactForces(
       warning.clear();
     }
   }
+}
+template <typename T>
+ScopeExit MultibodyPlant<T>::ThrowIfNonContactForceInProgress(
+    const systems::Context<T>& context) const {
+  // To overcame issue #12786, we use this additional cache entry
+  // to detect algebraic loops.
+  systems::CacheEntryValue& value =
+      this->get_cache_entry(
+              cache_indexes_.non_contact_forces_evaluation_in_progress)
+          .get_mutable_cache_entry_value(context);
+  bool& evaluation_in_progress = value.GetMutableValueOrThrow<bool>();
+  if (evaluation_in_progress) {
+    const char* error_message =
+        "Algebraic loop detected. This situation is caused when connecting "
+        "the input of your MultibodyPlant to the output of a feedback system "
+        "which is an algebraic function of a feedthrough output of the "
+        "plant. Ways to remedy this: 1. Revisit the model for your feedback "
+        "system. Consider if its output can be written in terms of other "
+        "inputs. 2. Break the algebraic loop by adding state to the "
+        "controller, typically to 'remember' a previous input. 3. Break the "
+        "algebraic loop by adding a zero-order hold system between the "
+        "output of the plant and your feedback system. This effectively "
+        "delays the input signal to the controller.";
+    throw std::runtime_error(error_message);
+  }
+  // Mark the start of the computation. If within an algebraic
+  // loop, pulling from the plant's input ports during the
+  // computation will trigger the recursive evaluation of this
+  // method and the exception above will be thrown.
+  evaluation_in_progress = true;
+  // If the exception above is triggered, we will leave this method and the
+  // computation will no longer be "in progress". We use a scoped guard so
+  // that we have a chance to mark it as such when we leave this scope.
+  return ScopeExit(
+      [&evaluation_in_progress]() { evaluation_in_progress = false; });
 }
 
 template <typename T>
@@ -2824,8 +2885,9 @@ void MultibodyPlant<T>::DeclareStateCacheAndPorts() {
                 instance_num_dofs)
             .get_index();
   }
-
-  if (num_actuated_instances == 1) actuated_instance_ = last_actuated_instance;
+  actuation_port_ =
+      this->DeclareVectorInputPort("actuation", num_actuated_dofs())
+          .get_index();
 
   // Declare the generalized force input port.
   applied_generalized_force_input_port_ =
@@ -2994,6 +3056,17 @@ void MultibodyPlant<T>::DeclareStateCacheAndPorts() {
                                   &MultibodyPlant<T>::CopyContactResultsOutput,
                                   {contact_results_cache_entry.ticket()})
                               .get_index();
+
+  // See ThrowIfNonContactForceInProgress().
+  const auto& non_contact_forces_evaluation_in_progress =
+      this->DeclareCacheEntry(
+          "Evaluation of non-contact forces and accelerations is in progress.",
+          // N.B. This flag is set to true only when the computation is in
+          // progress. Therefore its default value is `false`.
+          systems::ValueProducer(false, &systems::ValueProducer::NoopCalc),
+          {systems::System<T>::nothing_ticket()});
+  cache_indexes_.non_contact_forces_evaluation_in_progress =
+      non_contact_forces_evaluation_in_progress.cache_index();
 
   // Let external model managers declare their state, cache and ports in
   // `this` MultibodyPlant.
@@ -3210,15 +3283,6 @@ void MultibodyPlant<T>::CopyGeneralizedContactForcesOut(
 
 template <typename T>
 const systems::InputPort<T>&
-MultibodyPlant<T>::get_actuation_input_port() const {
-  DRAKE_MBP_THROW_IF_NOT_FINALIZED();
-  DRAKE_THROW_UNLESS(num_actuators() > 0);
-  DRAKE_THROW_UNLESS(actuated_instance_.is_valid());
-  return get_actuation_input_port(actuated_instance_);
-}
-
-template <typename T>
-const systems::InputPort<T>&
 MultibodyPlant<T>::get_applied_generalized_force_input_port() const {
   DRAKE_MBP_THROW_IF_NOT_FINALIZED();
   return this->get_input_port(applied_generalized_force_input_port_);
@@ -3233,6 +3297,13 @@ MultibodyPlant<T>::get_actuation_input_port(
   DRAKE_THROW_UNLESS(model_instance < num_model_instances());
   return systems::System<T>::get_input_port(
       instance_actuation_ports_.at(model_instance));
+}
+
+template <typename T>
+const systems::InputPort<T>& MultibodyPlant<T>::get_actuation_input_port()
+    const {
+  DRAKE_MBP_THROW_IF_NOT_FINALIZED();
+  return systems::System<T>::get_input_port(actuation_port_);
 }
 
 template <typename T>
@@ -3301,20 +3372,10 @@ MultibodyPlant<T>::get_reaction_forces_output_port() const {
   return this->get_output_port(reaction_forces_port_);
 }
 
-namespace {
-// A dummy, placeholder type.
-struct SymbolicGeometryValue {};
-// An alias for QueryObject<T>, except when T = Expression.
-template <typename T>
-using ModelQueryObject = typename std::conditional_t<
-    std::is_same_v<T, symbolic::Expression>,
-    SymbolicGeometryValue, geometry::QueryObject<T>>;
-}  // namespace
-
 template <typename T>
 void MultibodyPlant<T>::DeclareSceneGraphPorts() {
   geometry_query_port_ = this->DeclareAbstractInputPort(
-      "geometry_query", Value<ModelQueryObject<T>>{}).get_index();
+      "geometry_query", Value<geometry::QueryObject<T>>{}).get_index();
   geometry_pose_port_ = this->DeclareAbstractOutputPort(
       "geometry_pose", &MultibodyPlant<T>::CalcFramePoseOutput,
       {this->configuration_ticket()}).get_index();
@@ -3629,7 +3690,7 @@ AddMultibodyPlantSceneGraphResult<T> AddMultibodyPlantSceneGraph(
                                      std::move(scene_graph));
 }
 
-DRAKE_DEFINE_FUNCTION_TEMPLATE_INSTANTIATIONS_ON_DEFAULT_NONSYMBOLIC_SCALARS((
+DRAKE_DEFINE_FUNCTION_TEMPLATE_INSTANTIATIONS_ON_DEFAULT_SCALARS((
     /* Use static_cast to disambiguate the two different overloads. */
     static_cast<AddMultibodyPlantSceneGraphResult<T>(*)(
         systems::DiagramBuilder<T>*, double,

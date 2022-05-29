@@ -18,6 +18,8 @@ namespace parsing {
 namespace {
 
 using std::optional;
+using Eigen::Vector3d;
+using drake::geometry::GeometryId;
 using drake::math::RigidTransformd;
 using drake::multibody::AddMultibodyPlantSceneGraph;
 using drake::multibody::Frame;
@@ -36,6 +38,35 @@ std::unique_ptr<Parser> make_parser(MultibodyPlant<double>* plant) {
       std::string(kTestDir) + "/package.xml");
   parser->package_map().AddPackageXml(abspath_xml.string());
   return parser;
+}
+
+using CollisionPair = SortedPair<std::string>;
+void VerifyCollisionFilters(
+    const geometry::SceneGraph<double>& scene_graph,
+    const std::set<CollisionPair>& expected_filters) {
+  const auto& inspector = scene_graph.model_inspector();
+  // Get the collision geometry ids.
+  const std::vector<GeometryId> all_ids = inspector.GetAllGeometryIds();
+  geometry::GeometrySet id_set(all_ids);
+  auto collision_id_set = inspector.GetGeometryIds(
+      id_set, geometry::Role::kProximity);
+  std::vector<GeometryId> ids(collision_id_set.begin(),
+                              collision_id_set.end());
+  const int num_links = ids.size();
+  for (int m = 0; m < num_links; ++m) {
+    const std::string& m_name = inspector.GetName(ids[m]);
+    for (int n = m + 1; n < num_links; ++n) {
+      const std::string& n_name = inspector.GetName(ids[n]);
+      CollisionPair names{m_name, n_name};
+      SCOPED_TRACE(fmt::format("{} vs {}", names.first(), names.second()));
+      auto contains =
+          [&expected_filters](const CollisionPair& key) {
+            return expected_filters.count(key) > 0;
+          };
+      EXPECT_EQ(inspector.CollisionFiltered(ids[m], ids[n]),
+                contains(names));
+    }
+  }
 }
 
 // Simple smoke test of the most basic model directives.
@@ -76,21 +107,15 @@ GTEST_TEST(ProcessModelDirectivesTest, AddScopedSmokeTest) {
   plant.Finalize();
   auto diagram = builder.Build();
 
-  // Query information and ensure we have expected results.
-  // - Manually spell out one example.
-  ASSERT_EQ(
-      &GetScopedFrameByName(plant, "left::simple_model::frame"),
-      &plant.GetFrameByName(
-          "frame", plant.GetModelInstanceByName("left::simple_model")));
-  // - Automate other stuff.
+  // Helper lambda for checking existence of frame in model scope.
   auto check_frame = [&plant](
       const std::string instance, const std::string frame) {
     const std::string scoped_frame = instance + "::" + frame;
     drake::log()->debug("Check: {}", scoped_frame);
-    ASSERT_EQ(
-        &GetScopedFrameByName(plant, scoped_frame),
-        &plant.GetFrameByName(frame, plant.GetModelInstanceByName(instance)));
+    EXPECT_TRUE(
+        plant.HasFrameNamed(frame, plant.GetModelInstanceByName(instance)));
   };
+  // Query information and ensure we have expected results.
   for (const std::string prefix : {"", "left::", "right::", "mid::nested::"}) {
     const std::string simple_model = prefix + "simple_model";
     check_frame(simple_model, "base");
@@ -101,6 +126,136 @@ GTEST_TEST(ProcessModelDirectivesTest, AddScopedSmokeTest) {
     check_frame(extra_model, "base");
     check_frame(extra_model, "frame");
   }
+  // - Checking simple_model_test_frame frames that have model namespaces.
+  for (const std::string model_namespace : {"left", "right", "mid::nested"}) {
+    check_frame(model_namespace, "simple_model_test_frame");
+  }
+  // - Checking for simple_model_test_frame that was added without a model
+  // namespace. This frame was added without a model namespace, but ties itself
+  // to the model namespace of its base frame instead of the world. See next
+  // test, AddFrameWithoutScope, for a more concrete example.
+  check_frame("simple_model", "simple_model_test_frame");
+}
+
+// Tests for frames added without a model name, but different base_frame.
+GTEST_TEST(ProcessModelDirectivesTest, AddFrameWithoutScope) {
+  ModelDirectives directives = LoadModelDirectives(
+      FindResourceOrThrow(
+          std::string(kTestDir) + "/add_frame_without_model_namespace.yaml"));
+
+  // Ensure that we have a SceneGraph present so that we test relevant visual
+  // pieces.
+  DiagramBuilder<double> builder;
+  MultibodyPlant<double>& plant = AddMultibodyPlantSceneGraph(&builder, 0.);
+  ProcessModelDirectives(directives, &plant,
+                         nullptr, make_parser(&plant).get());
+  plant.Finalize();
+  auto diagram = builder.Build();
+
+  // When a frame is added without a namespace, it will scope itself under the
+  // base_frame's model instance.
+
+  // Frame added with world as base frame.
+  EXPECT_TRUE(
+      plant.HasFrameNamed("world_as_base_frame", world_model_instance()));
+
+  // Frame added with included model as base frame.
+  auto simple_model_instance = plant.GetModelInstanceByName("simple_model");
+  EXPECT_TRUE(
+      plant.HasFrameNamed("included_as_base_frame", simple_model_instance));
+}
+
+// Test backreference behavior in ModelDirectives.
+GTEST_TEST(ProcessModelDirectivesTest, TestBackreferences) {
+  ModelDirectives directives = LoadModelDirectives(
+      FindResourceOrThrow(std::string(kTestDir) + "/test_backreferences.yaml"));
+
+  // Ensure that we have a SceneGraph present so that we test relevant visual
+  // pieces.
+  DiagramBuilder<double> builder;
+  MultibodyPlant<double>& plant = AddMultibodyPlantSceneGraph(&builder, 0.);
+  ProcessModelDirectives(directives, &plant,
+                         nullptr, make_parser(&plant).get());
+  plant.Finalize();
+  auto diagram = builder.Build();
+
+  // Weld joint for the model without a namespace is placed under simple_model
+  // instead of world.
+  EXPECT_TRUE(plant.HasJointNamed(
+      "simple_model_origin_welds_to_base",
+      plant.GetModelInstanceByName("simple_model")));
+
+  // Weld joint for the nested model.
+  EXPECT_TRUE(plant.HasJointNamed(
+      "simple_model_origin_welds_to_base",
+      plant.GetModelInstanceByName("nested::simple_model")));
+}
+
+// Test frame injection in ModelDirectives.
+GTEST_TEST(ProcessModelDirectivesTest, InjectFrames) {
+  ModelDirectives directives = LoadModelDirectives(
+      FindResourceOrThrow(std::string(kTestDir) + "/inject_frames.yaml"));
+
+  // Ensure that we have a SceneGraph present so that we test relevant visual
+  // pieces.
+  DiagramBuilder<double> builder;
+  MultibodyPlant<double>& plant = AddMultibodyPlantSceneGraph(&builder, 0.);
+  ProcessModelDirectives(directives, &plant,
+                         nullptr, make_parser(&plant).get());
+  plant.Finalize();
+  auto diagram = builder.Build();
+  auto context = plant.CreateDefaultContext();
+
+  // Check that injected frames exist.
+  EXPECT_TRUE(plant.HasFrameNamed(
+      "top_injected_frame", plant.GetModelInstanceByName("top_level_model")));
+  EXPECT_TRUE(plant.HasFrameNamed(
+      "base", plant.GetModelInstanceByName("mid_level_model")));
+
+  // Check for pose of welded models' base.
+  EXPECT_TRUE(plant
+      .GetFrameByName("base", plant.GetModelInstanceByName("mid_level_model"))
+      .CalcPoseInWorld(*context)
+      .translation()
+      .isApprox(Vector3d(1, 2, 3)));
+  EXPECT_TRUE(plant
+      .GetFrameByName("base",
+                      plant.GetModelInstanceByName("bottom_level_model"))
+      .CalcPoseInWorld(*context)
+      .translation()
+      .isApprox(Vector3d(2, 4, 6)));
+}
+
+// Test collision filter groups in ModelDirectives.
+GTEST_TEST(ProcessModelDirectivesTest, CollisionFilterGroupSmokeTest) {
+  ModelDirectives directives = LoadModelDirectives(
+      FindResourceOrThrow(std::string(kTestDir) +
+                          "/collision_filter_group.yaml"));
+
+  // Ensure that we have a SceneGraph present so that we test relevant visual
+  // pieces.
+  DiagramBuilder<double> builder;
+  auto [plant, scene_graph] = AddMultibodyPlantSceneGraph(&builder, 0.);
+  ProcessModelDirectives(directives, &plant,
+                         nullptr, make_parser(&plant).get());
+
+  // Make sure the plant is not finalized such that the Finalize() default
+  // filtering has not taken into effect yet. This guarantees that the
+  // collision filtering is applied due to the collision filter group parsing.
+  ASSERT_FALSE(plant.is_finalized());
+
+  std::set<CollisionPair> expected_filters = {
+    // From group 'across_models'.
+    {"model1::collision",             "model2::collision"},
+    // From group 'nested_members'.
+    {"model1::collision",             "nested::sub_model2::collision"},
+    // From group 'nested_group'.
+    {"model3::collision",             "nested::sub_model1::collision"},
+    {"model3::collision",             "nested::sub_model2::collision"},
+    // From group 'across_sub_models'.
+    {"nested::sub_model1::collision", "nested::sub_model2::collision"},
+  };
+  VerifyCollisionFilters(scene_graph, expected_filters);
 }
 
 // Make sure we have good error messages.

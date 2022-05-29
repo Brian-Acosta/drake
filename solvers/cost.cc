@@ -115,20 +115,13 @@ shared_ptr<QuadraticCost> MakeQuadraticErrorCost(
   return make_shared<QuadraticCost>(2 * Q, -2 * Q * x_desired, c);
 }
 
-shared_ptr<QuadraticCost> MakeL2NormCost(
-    const Eigen::Ref<const Eigen::MatrixXd>& A,
-    const Eigen::Ref<const Eigen::VectorXd>& b) {
-  const double c = b.dot(b);
-  return make_shared<QuadraticCost>(2 * A.transpose() * A,
-                                    -2 * A.transpose() * b, c);
-}
-
 shared_ptr<QuadraticCost> Make2NormSquaredCost(
     const Eigen::Ref<const Eigen::MatrixXd>& A,
     const Eigen::Ref<const Eigen::VectorXd>& b) {
   const double c = b.dot(b);
   return make_shared<QuadraticCost>(2 * A.transpose() * A,
-                                    -2 * A.transpose() * b, c);
+                                    -2 * A.transpose() * b, c,
+                                    true /* Hessian is psd */);
 }
 
 L1NormCost::L1NormCost(const Eigen::Ref<const Eigen::MatrixXd>& A,
@@ -259,6 +252,57 @@ void LInfNormCost::DoEval(
 std::ostream& LInfNormCost::DoDisplay(
     std::ostream& os, const VectorX<symbolic::Variable>& vars) const {
   return DisplayCost(*this, os, "LInfNormCost", vars);
+}
+
+PerspectiveQuadraticCost::PerspectiveQuadraticCost(
+    const Eigen::Ref<const Eigen::MatrixXd>& A,
+    const Eigen::Ref<const Eigen::VectorXd>& b)
+    : Cost(A.cols()), A_(A), b_(b) {
+  DRAKE_DEMAND(A_.rows() >= 2);
+  DRAKE_DEMAND(A_.rows() == b_.rows());
+}
+
+void PerspectiveQuadraticCost::UpdateCoefficients(
+    const Eigen::Ref<const Eigen::MatrixXd>& new_A,
+    const Eigen::Ref<const Eigen::VectorXd>& new_b) {
+  if (new_A.cols() != A_.cols()) {
+    throw std::runtime_error("Can't change the number of decision variables");
+  }
+  if (new_A.rows() != new_b.rows()) {
+    throw std::runtime_error("A and b must have the same number of rows.");
+  }
+
+  A_ = new_A;
+  b_ = new_b;
+}
+
+template <typename DerivedX, typename U>
+void PerspectiveQuadraticCost::DoEvalGeneric(
+    const Eigen::MatrixBase<DerivedX>& x, VectorX<U>* y) const {
+  y->resize(1);
+  VectorX<U> z = A_ * x.template cast<U>() + b_;
+  (*y)(0) = z.tail(z.size() - 1).squaredNorm() / z(0);
+}
+
+void PerspectiveQuadraticCost::DoEval(
+    const Eigen::Ref<const Eigen::VectorXd>& x, Eigen::VectorXd* y) const {
+  DoEvalGeneric(x, y);
+}
+
+void PerspectiveQuadraticCost::DoEval(const Eigen::Ref<const AutoDiffVecXd>& x,
+                                      AutoDiffVecXd* y) const {
+  DoEvalGeneric(x, y);
+}
+
+void PerspectiveQuadraticCost::DoEval(
+    const Eigen::Ref<const VectorX<symbolic::Variable>>& x,
+    VectorX<symbolic::Expression>* y) const {
+  DoEvalGeneric(x, y);
+}
+
+std::ostream& PerspectiveQuadraticCost::DoDisplay(
+    std::ostream& os, const VectorX<symbolic::Variable>& vars) const {
+  return DisplayCost(*this, os, "PerspectiveQuadraticCost", vars);
 }
 
 }  // namespace solvers

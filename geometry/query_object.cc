@@ -2,6 +2,7 @@
 
 #include "drake/common/default_scalars.h"
 #include "drake/common/drake_assert.h"
+#include "drake/geometry/geometry_state.h"
 #include "drake/geometry/scene_graph.h"
 
 namespace drake {
@@ -72,6 +73,17 @@ const RigidTransform<T>& QueryObject<T>::GetPoseInWorld(
   FullPoseUpdate();
   const GeometryState<T>& state = geometry_state();
   return state.get_pose_in_world(geometry_id);
+}
+
+template <typename T>
+const VectorX<T>& QueryObject<T>::GetConfigurationsInWorld(
+    GeometryId geometry_id) const {
+  ThrowIfNotCallable();
+
+  // TODO(xuchenhan-tri): Update this function when mesh vertex positions can be
+  // updated from input ports.
+  const GeometryState<T>& state = geometry_state();
+  return state.get_configurations_in_world(geometry_id);
 }
 
 template <typename T>

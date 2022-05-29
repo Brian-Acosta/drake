@@ -7,16 +7,16 @@ by listing for LCM messages that are broadcast by the simulation.
 This can stand in for the legacy ``drake-visualizer`` application of
 days past.
 
-From a Drake source build, run this as:
+From a Drake source build, run this as::
 
   bazel run //tools:meldis &
 
-From a Drake binary release, run this as:
+From a Drake binary release (including pip releases), run this as::
 
   python3 -m pydrake.visualization.meldis
 
 In many cases, passing ``-w`` (i.e., ``--open-window``) to the program will be
-convenient.
+convenient::
 
   bazel run //tools:meldis -- -w &
 """
@@ -34,6 +34,9 @@ from drake import (
     lcmt_viewer_geometry_data,
     lcmt_viewer_load_robot,
 )
+from pydrake.common import (
+    configure_logging,
+)
 from pydrake.common.eigen_geometry import (
     Quaternion,
 )
@@ -44,6 +47,7 @@ from pydrake.geometry import (
     Ellipsoid,
     Mesh,
     Meshcat,
+    MeshcatParams,
     Rgba,
     Sphere,
 )
@@ -55,10 +59,14 @@ from pydrake.math import (
     RotationMatrix,
 )
 from pydrake.multibody.meshcat import (
+    _HydroelasticContactVisualizer,
+    _HydroelasticContactVisualizerItem,
     _PointContactVisualizer,
     _PointContactVisualizerItem,
     ContactVisualizerParams,
 )
+
+_logger = logging.getLogger("drake")
 
 
 class _ViewerApplet:
@@ -135,7 +143,7 @@ class _ViewerApplet:
             (radius,) = geom.float_data
             shape = Sphere(radius=radius)
         else:
-            logging.warning(f"Unknown geom.type of {geom.type}")
+            _logger.warning(f"Unknown geom.type of {geom.type}")
             return (None, None, None)
         rgba = Rgba(*geom.color)
         pose = self._to_pose(geom.position, geom.quaternion)
@@ -169,11 +177,19 @@ class _ContactApplet:
         # Add point visualization.
         params = ContactVisualizerParams()
         params.prefix = "/CONTACT_RESULTS/point"
-        self._helper = _PointContactVisualizer(meshcat, params)
+        self._point_helper = _PointContactVisualizer(meshcat, params)
+
+        # Add hydroelastic visualization.
+        params = ContactVisualizerParams()
+        params.prefix = "/CONTACT_RESULTS/hydroelastic"
+        self._hydro_helper = _HydroelasticContactVisualizer(meshcat, params)
 
     def on_contact_results(self, message):
         """Handler for lcmt_contact_results_for_viz. Note that only point
-        contacts are shown so far; hydroelastic contacts are not shown."""
+           hydroelastic contact force and moment vectors are shown; contact
+           surface and pressure are not shown."""
+
+        # Handle point contact pairs
         viz_items = []
         for lcm_item in message.point_pair_contact_info:
             viz_items.append(_PointContactVisualizerItem(
@@ -181,7 +197,18 @@ class _ContactApplet:
                 body_B=lcm_item.body2_name,
                 contact_force=lcm_item.contact_force,
                 contact_point=lcm_item.contact_point))
-        self._helper.Update(viz_items)
+        self._point_helper.Update(viz_items)
+
+        # Handle hydroelastic contact pairs
+        viz_items = []
+        for lcm_item in message.hydroelastic_contacts:
+            viz_items.append(_HydroelasticContactVisualizerItem(
+                body_A=lcm_item.body1_name,
+                body_B=lcm_item.body2_name,
+                centroid_W=lcm_item.centroid_W,
+                force_C_W=lcm_item.force_C_W,
+                moment_C_W=lcm_item.moment_C_W))
+        self._hydro_helper.Update(viz_items)
 
 
 class Meldis:
@@ -205,9 +232,10 @@ class Meldis:
 
         self._lcm = DrakeLcm()
         lcm_url = self._lcm.get_lcm_url()
-        logging.info(f"Meldis is listening for LCM messages at {lcm_url}")
+        _logger.info(f"Meldis is listening for LCM messages at {lcm_url}")
 
-        self.meshcat = Meshcat(port=meshcat_port)
+        params = MeshcatParams(host="localhost", port=meshcat_port)
+        self.meshcat = Meshcat(params=params)
 
         viewer = _ViewerApplet(meshcat=self.meshcat)
         self._subscribe(channel="DRAKE_VIEWER_LOAD_ROBOT",
@@ -310,14 +338,13 @@ class Meldis:
 
         # In case we are idle for too long, exit automatically.
         if now > self._last_active + idle_timeout:
-            logging.info("Meldis is exiting now; no browser was connected for"
+            _logger.info("Meldis is exiting now; no browser was connected for"
                          f" >{idle_timeout} seconds")
             sys.exit(1)
 
 
 def _main():
-    format = "[%(asctime)s] [console] [%(levelname)s] %(message)s"
-    logging.basicConfig(level=logging.INFO, format=format)
+    configure_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-p", "--port", action="store", metavar="NUM", type=int,

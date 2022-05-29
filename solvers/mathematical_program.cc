@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <ostream>
 #include <set>
@@ -39,7 +40,6 @@ using std::numeric_limits;
 using std::ostringstream;
 using std::pair;
 using std::runtime_error;
-using std::set;
 using std::shared_ptr;
 using std::string;
 using std::unordered_map;
@@ -51,6 +51,8 @@ using symbolic::Variable;
 using symbolic::Variables;
 
 using internal::CreateBinding;
+
+const double kInf = std::numeric_limits<double>::infinity();
 
 MathematicalProgram::MathematicalProgram() = default;
 
@@ -178,11 +180,13 @@ symbolic::Polynomial MathematicalProgram::NewFreePolynomialImpl(
           indeterminates, degree, degree_type);
   const VectorXDecisionVariable coeffs{
       this->NewContinuousVariables(m.size(), coeff_name)};
-  symbolic::Polynomial p;
-  for (int i = 0; i < m.size(); ++i) {
-    p.AddProduct(coeffs(i), m(i));  // p += coeffs(i) * m(i);
+  symbolic::Polynomial::MapType p_map;
+  // Since each entry in m is unique, we construct the polynomial using a map
+  // with m(i) being the map key.
+  for (int i = 0; i < coeffs.rows(); ++i) {
+    p_map.emplace(m(i), coeffs(i));
   }
-  return p;
+  return symbolic::Polynomial(std::move(p_map));
 }
 
 symbolic::Polynomial MathematicalProgram::NewFreePolynomial(
@@ -213,9 +217,9 @@ symbolic::Polynomial MathematicalProgram::NewOddDegreeFreePolynomial(
 pair<symbolic::Polynomial, MatrixXDecisionVariable>
 MathematicalProgram::NewSosPolynomial(
     const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis,
-    NonnegativePolynomial type) {
+    NonnegativePolynomial type, const std::string& gram_name) {
   const MatrixXDecisionVariable Q =
-      NewSymmetricContinuousVariables(monomial_basis.size());
+      NewSymmetricContinuousVariables(monomial_basis.size(), gram_name);
   const symbolic::Polynomial p = NewSosPolynomial(Q, monomial_basis, type);
   return std::make_pair(p, Q);
 }
@@ -268,32 +272,23 @@ symbolic::Polynomial MathematicalProgram::NewSosPolynomial(
 
 pair<symbolic::Polynomial, MatrixXDecisionVariable>
 MathematicalProgram::NewSosPolynomial(const symbolic::Variables& indeterminates,
-                                      int degree, NonnegativePolynomial type) {
-  DRAKE_DEMAND(degree > 0 && degree % 2 == 0);
-  const drake::VectorX<symbolic::Monomial> x{
-      MonomialBasis(indeterminates, degree / 2)};
-  return NewSosPolynomial(x, type);
-}
-
-std::pair<symbolic::Polynomial, MatrixXDecisionVariable>
-MathematicalProgram::NewNonnegativePolynomial(
-    const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis,
-    NonnegativePolynomial type) {
-  return NewSosPolynomial(monomial_basis, type);
-}
-
-symbolic::Polynomial MathematicalProgram::NewNonnegativePolynomial(
-    const Eigen::Ref<const MatrixX<symbolic::Variable>>& gramian,
-    const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis,
-    NonnegativePolynomial type) {
-  return NewSosPolynomial(gramian, monomial_basis, type);
-}
-
-pair<symbolic::Polynomial, MatrixXDecisionVariable>
-MathematicalProgram::NewNonnegativePolynomial(const Variables& indeterminates,
-                                              const int degree,
-                                              NonnegativePolynomial type) {
-  return NewSosPolynomial(indeterminates, degree, type);
+                                      int degree, NonnegativePolynomial type,
+                                      const std::string& gram_name) {
+  DRAKE_DEMAND(degree >= 0 && degree % 2 == 0);
+  if (degree == 0) {
+    // The polynomial only has a non-negative constant term.
+    const symbolic::Variable poly_constant =
+        NewContinuousVariables<1>(gram_name)(0);
+    AddBoundingBoxConstraint(0, kInf, poly_constant);
+    MatrixXDecisionVariable gram(1, 1);
+    gram(0, 0) = poly_constant;
+    return std::make_pair(
+        symbolic::Polynomial({{symbolic::Monomial(), poly_constant}}), gram);
+  } else {
+    const drake::VectorX<symbolic::Monomial> x{
+        MonomialBasis(indeterminates, degree / 2)};
+    return NewSosPolynomial(x, type, gram_name);
+  }
 }
 
 std::tuple<symbolic::Polynomial, MatrixXDecisionVariable,
@@ -430,7 +425,7 @@ Binding<Cost> MathematicalProgram::AddCost(const Binding<Cost>& binding) {
   } else if (dynamic_cast<L2NormCost*>(cost)) {
     return AddCost(internal::BindingDynamicCast<L2NormCost>(binding));
   } else {
-    CheckBinding(binding);
+    DRAKE_DEMAND(CheckBinding(binding));
     required_capabilities_.insert(ProgramAttribute::kGenericCost);
     generic_costs_.push_back(binding);
     return generic_costs_.back();
@@ -439,7 +434,7 @@ Binding<Cost> MathematicalProgram::AddCost(const Binding<Cost>& binding) {
 
 Binding<LinearCost> MathematicalProgram::AddCost(
     const Binding<LinearCost>& binding) {
-  CheckBinding(binding);
+  DRAKE_DEMAND(CheckBinding(binding));
   required_capabilities_.insert(ProgramAttribute::kLinearCost);
   linear_costs_.push_back(binding);
   return linear_costs_.back();
@@ -457,7 +452,7 @@ Binding<LinearCost> MathematicalProgram::AddLinearCost(
 
 Binding<QuadraticCost> MathematicalProgram::AddCost(
     const Binding<QuadraticCost>& binding) {
-  CheckBinding(binding);
+  DRAKE_DEMAND(CheckBinding(binding));
   required_capabilities_.insert(ProgramAttribute::kQuadraticCost);
   DRAKE_ASSERT(binding.evaluator()->Q().rows() ==
                    static_cast<int>(binding.GetNumElements()) &&
@@ -497,7 +492,7 @@ Binding<QuadraticCost> MathematicalProgram::AddQuadraticCost(
 
 Binding<L2NormCost> MathematicalProgram::AddCost(
     const Binding<L2NormCost>& binding) {
-  CheckBinding(binding);
+  DRAKE_DEMAND(CheckBinding(binding));
   required_capabilities_.insert(ProgramAttribute::kL2NormCost);
   l2norm_costs_.push_back(binding);
   return l2norm_costs_.back();
@@ -581,13 +576,6 @@ MathematicalProgram::AddMaximizeLogDeterminantCost(
 
   const auto cost = AddLinearCost(-Eigen::VectorXd::Ones(t.rows()), t);
   return std::make_tuple(cost, std::move(t), std::move(Z));
-}
-
-std::tuple<Binding<LinearCost>, VectorX<symbolic::Variable>,
-           MatrixX<symbolic::Expression>>
-MathematicalProgram::AddMaximizeLogDeterminantSymmetricMatrixCost(
-    const Eigen::Ref<const MatrixX<symbolic::Expression>>& X) {
-  return AddMaximizeLogDeterminantCost(X);
 }
 
 Binding<LinearCost> MathematicalProgram::AddMaximizeGeometricMeanCost(
@@ -728,7 +716,9 @@ Binding<Constraint> MathematicalProgram::AddConstraint(
     return AddConstraint(
         internal::BindingDynamicCast<LinearConstraint>(binding));
   } else {
-    CheckBinding(binding);
+    if (!CheckBinding(binding)) {
+      return binding;
+    }
     required_capabilities_.insert(ProgramAttribute::kGenericConstraint);
     generic_constraints_.push_back(binding);
     return generic_constraints_.back();
@@ -751,11 +741,6 @@ Binding<Constraint> MathematicalProgram::AddConstraint(
   DRAKE_DEMAND(v.cols() == ub.cols());
   return AddConstraint(
       internal::ParseConstraint(Flatten(v), Flatten(lb), Flatten(ub)));
-}
-
-Binding<Constraint> MathematicalProgram::AddConstraint(
-    const set<Formula>& formulas) {
-  return AddConstraint(internal::ParseConstraint(formulas));
 }
 
 Binding<Constraint> MathematicalProgram::AddConstraint(const Formula& f) {
@@ -811,6 +796,22 @@ Binding<LinearConstraint> MathematicalProgram::AddLinearConstraint(
   }
 }
 
+Binding<LinearConstraint> MathematicalProgram::AddLinearConstraint(
+    const Eigen::Ref<const Eigen::Array<
+        symbolic::Formula, Eigen::Dynamic, Eigen::Dynamic>>& formulas) {
+  Binding<Constraint> binding = internal::ParseConstraint(formulas);
+  Constraint* constraint = binding.evaluator().get();
+  if (dynamic_cast<LinearConstraint*>(constraint)) {
+    return AddConstraint(
+        internal::BindingDynamicCast<LinearConstraint>(binding));
+  } else {
+    std::stringstream oss;
+    oss << "Formulas are non-linear.";
+    throw std::runtime_error(
+        "AddLinearConstraint called but formulas are non-linear");
+  }
+}
+
 Binding<LinearConstraint> MathematicalProgram::AddConstraint(
     const Binding<LinearConstraint>& binding) {
   // Because the ParseConstraint methods can return instances of
@@ -826,9 +827,11 @@ Binding<LinearConstraint> MathematicalProgram::AddConstraint(
   } else {
     // TODO(eric.cousineau): This is a good assertion... But seems out of place,
     // possibly redundant w.r.t. the binding infrastructure.
-    DRAKE_ASSERT(binding.evaluator()->A().cols() ==
+    DRAKE_ASSERT(binding.evaluator()->GetDenseA().cols() ==
                  static_cast<int>(binding.GetNumElements()));
-    CheckBinding(binding);
+    if (!CheckBinding(binding)) {
+      return binding;
+    }
     required_capabilities_.insert(ProgramAttribute::kLinearConstraint);
     linear_constraints_.push_back(binding);
     return linear_constraints_.back();
@@ -845,9 +848,11 @@ Binding<LinearConstraint> MathematicalProgram::AddLinearConstraint(
 
 Binding<LinearEqualityConstraint> MathematicalProgram::AddConstraint(
     const Binding<LinearEqualityConstraint>& binding) {
-  DRAKE_ASSERT(binding.evaluator()->A().cols() ==
+  DRAKE_ASSERT(binding.evaluator()->GetDenseA().cols() ==
                static_cast<int>(binding.GetNumElements()));
-  CheckBinding(binding);
+  if (!CheckBinding(binding)) {
+    return binding;
+  }
   required_capabilities_.insert(ProgramAttribute::kLinearEqualityConstraint);
   linear_equality_constraints_.push_back(binding);
   return linear_equality_constraints_.back();
@@ -857,11 +862,6 @@ Binding<LinearEqualityConstraint>
 MathematicalProgram::AddLinearEqualityConstraint(const Expression& e,
                                                  double b) {
   return AddConstraint(internal::ParseLinearEqualityConstraint(e, b));
-}
-
-Binding<LinearEqualityConstraint>
-MathematicalProgram::AddLinearEqualityConstraint(const set<Formula>& formulas) {
-  return AddConstraint(internal::ParseLinearEqualityConstraint(formulas));
 }
 
 Binding<LinearEqualityConstraint>
@@ -879,7 +879,9 @@ MathematicalProgram::AddLinearEqualityConstraint(
 
 Binding<BoundingBoxConstraint> MathematicalProgram::AddConstraint(
     const Binding<BoundingBoxConstraint>& binding) {
-  CheckBinding(binding);
+  if (!CheckBinding(binding)) {
+    return binding;
+  }
   DRAKE_ASSERT(binding.evaluator()->num_outputs() ==
                static_cast<int>(binding.GetNumElements()));
   required_capabilities_.insert(ProgramAttribute::kLinearConstraint);
@@ -889,7 +891,7 @@ Binding<BoundingBoxConstraint> MathematicalProgram::AddConstraint(
 
 Binding<LorentzConeConstraint> MathematicalProgram::AddConstraint(
     const Binding<LorentzConeConstraint>& binding) {
-  CheckBinding(binding);
+  DRAKE_DEMAND(CheckBinding(binding));
   required_capabilities_.insert(ProgramAttribute::kLorentzConeConstraint);
   lorentz_cone_constraint_.push_back(binding);
   return lorentz_cone_constraint_.back();
@@ -920,7 +922,7 @@ Binding<LorentzConeConstraint> MathematicalProgram::AddLorentzConeConstraint(
 
 Binding<RotatedLorentzConeConstraint> MathematicalProgram::AddConstraint(
     const Binding<RotatedLorentzConeConstraint>& binding) {
-  CheckBinding(binding);
+  DRAKE_DEMAND(CheckBinding(binding));
   required_capabilities_.insert(
       ProgramAttribute::kRotatedLorentzConeConstraint);
   rotated_lorentz_cone_constraint_.push_back(binding);
@@ -956,6 +958,16 @@ MathematicalProgram::AddRotatedLorentzConeConstraint(
   return AddConstraint(constraint, vars);
 }
 
+Binding<RotatedLorentzConeConstraint>
+MathematicalProgram::AddQuadraticAsRotatedLorentzConeConstraint(
+    const Eigen::Ref<const Eigen::MatrixXd>& Q,
+    const Eigen::Ref<const Eigen::VectorXd>& b, double c,
+    const Eigen::Ref<const VectorXDecisionVariable>& vars, double psd_tol) {
+  auto constraint =
+      internal::ParseQuadraticAsRotatedLorentzConeConstraint(Q, b, c, psd_tol);
+  return AddConstraint(constraint, vars);
+}
+
 Binding<BoundingBoxConstraint> MathematicalProgram::AddBoundingBoxConstraint(
     const Eigen::Ref<const Eigen::MatrixXd>& lb,
     const Eigen::Ref<const Eigen::MatrixXd>& ub,
@@ -972,7 +984,9 @@ Binding<BoundingBoxConstraint> MathematicalProgram::AddBoundingBoxConstraint(
 
 Binding<LinearComplementarityConstraint> MathematicalProgram::AddConstraint(
     const Binding<LinearComplementarityConstraint>& binding) {
-  CheckBinding(binding);
+  if (!CheckBinding(binding)) {
+    return binding;
+  }
 
   required_capabilities_.insert(
       ProgramAttribute::kLinearComplementarityConstraint);
@@ -1008,7 +1022,9 @@ Binding<Constraint> MathematicalProgram::AddPolynomialConstraint(
 
 Binding<PositiveSemidefiniteConstraint> MathematicalProgram::AddConstraint(
     const Binding<PositiveSemidefiniteConstraint>& binding) {
-  CheckBinding(binding);
+  if (!CheckBinding(binding)) {
+    return binding;
+  }
   DRAKE_ASSERT(math::IsSymmetric(Eigen::Map<const MatrixXDecisionVariable>(
       binding.variables().data(), binding.evaluator()->matrix_rows(),
       binding.evaluator()->matrix_rows())));
@@ -1035,7 +1051,9 @@ MathematicalProgram::AddPositiveSemidefiniteConstraint(
 
 Binding<LinearMatrixInequalityConstraint> MathematicalProgram::AddConstraint(
     const Binding<LinearMatrixInequalityConstraint>& binding) {
-  CheckBinding(binding);
+  if (!CheckBinding(binding)) {
+    return binding;
+  }
   DRAKE_ASSERT(static_cast<int>(binding.evaluator()->F().size()) ==
                static_cast<int>(binding.GetNumElements()) + 1);
   required_capabilities_.insert(
@@ -1213,7 +1231,7 @@ MathematicalProgram::AddScaledDiagonallyDominantMatrixConstraint(
 
 Binding<ExponentialConeConstraint> MathematicalProgram::AddConstraint(
     const Binding<ExponentialConeConstraint>& binding) {
-  CheckBinding(binding);
+  DRAKE_DEMAND(CheckBinding(binding));
   required_capabilities_.insert(ProgramAttribute::kExponentialConeConstraint);
   exponential_cone_constraints_.push_back(binding);
   return exponential_cone_constraints_.back();
@@ -1339,8 +1357,9 @@ namespace {
 MatrixXDecisionVariable DoAddSosConstraint(
     MathematicalProgram* const prog, const symbolic::Polynomial& p,
     const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis,
-    MathematicalProgram::NonnegativePolynomial type) {
-  const auto pair = prog->NewSosPolynomial(monomial_basis, type);
+    MathematicalProgram::NonnegativePolynomial type,
+    const std::string& gram_name) {
+  const auto pair = prog->NewSosPolynomial(monomial_basis, type, gram_name);
   const symbolic::Polynomial& sos_poly{pair.first};
   const MatrixXDecisionVariable& Q{pair.second};
 
@@ -1354,9 +1373,12 @@ MatrixXDecisionVariable DoAddSosConstraint(
 // Body of MathematicalProgram::AddSosConstraint(const symbolic::Polynomial&).
 pair<MatrixXDecisionVariable, VectorX<symbolic::Monomial>> DoAddSosConstraint(
     MathematicalProgram* const prog, const symbolic::Polynomial& p,
-    MathematicalProgram::NonnegativePolynomial type) {
-  const VectorX<symbolic::Monomial> m = ConstructMonomialBasis(p);
-  const MatrixXDecisionVariable Q = prog->AddSosConstraint(p, m, type);
+    MathematicalProgram::NonnegativePolynomial type,
+    const std::string& gram_name) {
+  const symbolic::Polynomial p_expanded = p.Expand();
+  const VectorX<symbolic::Monomial> m = ConstructMonomialBasis(p_expanded);
+  const MatrixXDecisionVariable Q =
+      prog->AddSosConstraint(p_expanded, m, type, gram_name);
   return std::make_pair(Q, m);
 }
 
@@ -1365,62 +1387,70 @@ pair<MatrixXDecisionVariable, VectorX<symbolic::Monomial>> DoAddSosConstraint(
 MatrixXDecisionVariable MathematicalProgram::AddSosConstraint(
     const symbolic::Polynomial& p,
     const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis,
-    MathematicalProgram::NonnegativePolynomial type) {
+    MathematicalProgram::NonnegativePolynomial type,
+    const std::string& gram_name) {
   const Variables indeterminates_vars{indeterminates()};
   if (Variables(p.indeterminates()).IsSubsetOf(indeterminates_vars) &&
       intersect(indeterminates_vars, Variables(p.decision_variables()))
           .empty()) {
-    return DoAddSosConstraint(this, p, monomial_basis, type);
+    return DoAddSosConstraint(this, p, monomial_basis, type, gram_name);
   } else {
     // Need to reparse p, we first make a copy of p and reparse that.
     symbolic::Polynomial p_reparsed{p};
     Reparse(&p_reparsed);
-    return DoAddSosConstraint(this, p_reparsed, monomial_basis, type);
+    return DoAddSosConstraint(this, p_reparsed, monomial_basis, type,
+                              gram_name);
   }
 }
 
 pair<MatrixXDecisionVariable, VectorX<symbolic::Monomial>>
 MathematicalProgram::AddSosConstraint(
     const symbolic::Polynomial& p,
-    MathematicalProgram::NonnegativePolynomial type) {
+    MathematicalProgram::NonnegativePolynomial type,
+    const std::string& gram_name) {
   const Variables indeterminates_vars{indeterminates()};
   if (Variables(p.indeterminates()).IsSubsetOf(indeterminates_vars) &&
       intersect(indeterminates_vars, Variables(p.decision_variables()))
           .empty()) {
-    return DoAddSosConstraint(this, p, type);
+    return DoAddSosConstraint(this, p, type, gram_name);
   } else {
     // Need to reparse p, we first make a copy of p and reparse that.
     symbolic::Polynomial p_reparsed{p};
     Reparse(&p_reparsed);
-    return DoAddSosConstraint(this, p_reparsed, type);
+    return DoAddSosConstraint(this, p_reparsed, type, gram_name);
   }
 }
 
 MatrixXDecisionVariable MathematicalProgram::AddSosConstraint(
     const symbolic::Expression& e,
     const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis,
-    MathematicalProgram::NonnegativePolynomial type) {
+    MathematicalProgram::NonnegativePolynomial type,
+    const std::string& gram_name) {
   return AddSosConstraint(
       symbolic::Polynomial{e, symbolic::Variables{this->indeterminates()}},
-      monomial_basis, type);
+      monomial_basis, type, gram_name);
 }
 
 pair<MatrixXDecisionVariable, VectorX<symbolic::Monomial>>
 MathematicalProgram::AddSosConstraint(
     const symbolic::Expression& e,
-    MathematicalProgram::NonnegativePolynomial type) {
+    MathematicalProgram::NonnegativePolynomial type,
+    const std::string& gram_name) {
   return AddSosConstraint(
       symbolic::Polynomial{e, symbolic::Variables{this->indeterminates()}},
-      type);
+      type, gram_name);
 }
 
-void MathematicalProgram::AddEqualityConstraintBetweenPolynomials(
+std::vector<Binding<LinearEqualityConstraint>>
+MathematicalProgram::AddEqualityConstraintBetweenPolynomials(
     const symbolic::Polynomial& p1, const symbolic::Polynomial& p2) {
   symbolic::Polynomial poly_diff = p1 - p2;
   Reparse(&poly_diff);
+  std::vector<Binding<LinearEqualityConstraint>> ret;
   for (const auto& item : poly_diff.monomial_to_coefficient_map()) {
-    AddLinearEqualityConstraint(item.second, 0);
+    ret.push_back(AddLinearEqualityConstraint(item.second, 0));
   }
+  return ret;
 }
 
 double MathematicalProgram::GetInitialGuess(
@@ -1760,6 +1790,29 @@ void MathematicalProgram::CheckVariableType(VarType var_type) {
           "MathematicalProgram does not support random exponential "
           "variables.");
   }
+}
+
+void MathematicalProgram::CheckIsDecisionVariable(
+    const VectorXDecisionVariable& vars) const {
+  for (int i = 0; i < vars.rows(); ++i) {
+    for (int j = 0; j < vars.cols(); ++j) {
+      if (decision_variable_index_.count(vars(i, j).get_id()) == 0) {
+        throw std::logic_error(fmt::format(
+            "{} is not a decision variable of the mathematical program.",
+            vars(i, j)));
+      }
+    }
+  }
+}
+
+template <typename C>
+bool MathematicalProgram::CheckBinding(const Binding<C>& binding) const {
+  // TODO(eric.cousineau): In addition to identifiers, hash bindings by
+  // their constraints and their variables, to prevent duplicates.
+  // TODO(eric.cousineau): Once bindings have identifiers (perhaps
+  // retrofitting `description`), ensure that they have unique names.
+  CheckIsDecisionVariable(binding.variables());
+  return (binding.evaluator()->num_outputs() > 0);
 }
 
 std::ostream& operator<<(std::ostream& os, const MathematicalProgram& prog) {
