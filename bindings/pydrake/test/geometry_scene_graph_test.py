@@ -32,10 +32,11 @@ class TestGeometrySceneGraph(unittest.TestCase):
         scene_graph = SceneGraph()
         global_source = scene_graph.RegisterSource("anchored")
         global_frame = scene_graph.RegisterFrame(
-            source_id=global_source, frame=mut.GeometryFrame("anchored_frame"))
+            source_id=global_source,
+            frame=mut.GeometryFrame("anchored_frame1"))
         scene_graph.RegisterFrame(
             source_id=global_source, parent_id=global_frame,
-            frame=mut.GeometryFrame("anchored_frame"))
+            frame=mut.GeometryFrame("anchored_frame2"))
         global_geometry = scene_graph.RegisterGeometry(
             source_id=global_source, frame_id=global_frame,
             geometry=mut.GeometryInstance(X_PG=RigidTransform_[float](),
@@ -194,7 +195,7 @@ class TestGeometrySceneGraph(unittest.TestCase):
         self.assertEqual(inspector.GetOwningSourceName(frame_id=global_frame),
                          "anchored")
         self.assertEqual(
-            inspector.GetName(frame_id=global_frame), "anchored_frame")
+            inspector.GetName(frame_id=global_frame), "anchored_frame1")
         self.assertEqual(inspector.GetFrameGroup(frame_id=global_frame), 0)
         self.assertEqual(
             inspector.NumGeometriesForFrame(frame_id=global_frame), 2)
@@ -293,6 +294,34 @@ class TestGeometrySceneGraph(unittest.TestCase):
                     source_id=global_source, geometry_id=global_geometry,
                     role=role),
                 1)
+
+    @numpy_compare.check_all_types
+    def test_scene_graph_remove_geometry(self, T):
+        SceneGraph = mut.SceneGraph_[T]
+
+        scene_graph = SceneGraph()
+        global_source = scene_graph.RegisterSource("anchored")
+        global_frame = scene_graph.world_frame_id()
+        global_geometry = scene_graph.RegisterGeometry(
+            source_id=global_source, frame_id=global_frame,
+            geometry=mut.GeometryInstance(X_PG=RigidTransform_[float](),
+                                          shape=mut.Sphere(1.),
+                                          name="sphere1"))
+        context = scene_graph.CreateDefaultContext()
+        model_inspector = scene_graph.model_inspector()
+        query_object = scene_graph.get_query_output_port().Eval(context)
+        context_inspector = query_object.inspector()
+        # Call the version that only removes the geometry in the context.
+        scene_graph.RemoveGeometry(
+            context=context,
+            source_id=global_source,
+            geometry_id=global_geometry)
+        self.assertEqual(model_inspector.num_geometries(), 1)
+        self.assertEqual(context_inspector.num_geometries(), 0)
+        # Now remove the geometry in scene_graph
+        scene_graph.RemoveGeometry(
+            source_id=global_source, geometry_id=global_geometry)
+        self.assertEqual(model_inspector.num_geometries(), 0)
 
     @numpy_compare.check_all_types
     def test_frame_pose_vector_api(self, T):
