@@ -218,8 +218,7 @@ class Ellipsoid final : public Shape {
   double c() const { return radii_(2); }
 
  private:
-
-  <double> radii_;
+  Vector3<double> radii_;
 };
 
 /** Definition of a half space. In its canonical frame, the plane defining the
@@ -366,22 +365,22 @@ class HeightField final : public Shape {
   /** Constructs the parameterized heightmap.
    * @throws std::exception if min(`height`) < -`depth`
    */
-  explicit HeightField(MatrixX<double> heights, double dim_x, double dim_y);9
+  explicit HeightField(MatrixX<double> heights, double dim_x, double dim_y);
 
   /**
    * See HalfSpace::MakePose
    */
   static math::RigidTransform<double> MakePose(const Vector3<double>& Hz_dir_F,
                                                const Vector3<double>& p_FB);
-  MatrixX<double> heights() { return  heights_; }
-  VectorX<double> x_grid() { return x_grid_; }
-  VectorX<double> y_grid() { return y_grid_; }
-  double dim_x() { return dim_x_; }
-  double dim_y() { return dim_y_; }
-  double x_resolution() { return x_resolution_; }
-  double y_resolution() {return y_resolution_; }
-  int nx() { return nx_; }
-  int ny() { return ny_; }
+  MatrixX<double> heights() const { return  heights_; }
+  VectorX<double> x_grid() const { return x_grid_; }
+  VectorX<double> y_grid() const { return y_grid_; }
+  double dim_x() const { return dim_x_; }
+  double dim_y() const { return dim_y_; }
+  double x_resolution() const { return x_resolution_; }
+  double y_resolution() const {return y_resolution_; }
+  int nx() const { return nx_; }
+  int ny() const { return ny_; }
 
  private:
   MatrixX<double> heights_;
