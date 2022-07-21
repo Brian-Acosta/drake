@@ -148,6 +148,22 @@ MeshcatCone::MeshcatCone(double height, double a, double b)
   }
 }
 
+HeightField::HeightField(MatrixX<double> heights, double dim_x, double dim_y)
+    : Shape(ShapeTag<HeightField>()), heights_(heights), dim_x_(dim_x),
+    dim_y_(dim_y) {
+  if (dim_x <= 0 || dim_y <= 0) {
+    throw std::logic_error(fmt::format(
+        "HeightField parameters dim_x and dim_y should both be "
+        " > 0 (They were {} and {} respectively).", dim_x, dim_y));
+  }
+
+}
+
+RigidTransform<double> HeightField::MakePose(const Vector3<double>& Hz_dir_F,
+                                             const Vector3<double>& p_FB) {
+  return HalfSpace::MakePose(Hz_dir_F, p_FB);
+}
+
 ShapeReifier::~ShapeReifier() = default;
 
 void ShapeReifier::ImplementGeometry(const Sphere&, void*) {
@@ -183,6 +199,10 @@ void ShapeReifier::ImplementGeometry(const Convex&, void*) {
 
 void ShapeReifier::ImplementGeometry(const MeshcatCone&, void*) {
   ThrowUnsupportedGeometry("MeshcatCone");
+}
+
+void ShapeReifier::ImplementGeometry(const HeightField&, void*) {
+  ThrowUnsupportedGeometry("HeightField");
 }
 
 void ShapeReifier::ThrowUnsupportedGeometry(const std::string& shape_name) {
@@ -231,6 +251,10 @@ void ShapeName::ImplementGeometry(const Convex&, void*) {
 void ShapeName::ImplementGeometry(const MeshcatCone&, void*) {
   string_ = "MeshcatCone";
 }
+void ShapeName::ImplementGeometry(const HeightField&, void*) {
+  string_ = "HeightField";
+}
+
 
 std::ostream& operator<<(std::ostream& out, const ShapeName& name) {
   out << name.name();
@@ -266,7 +290,9 @@ class CalcVolumeReifier final : public ShapeReifier {
   void ImplementGeometry(const MeshcatCone& cone, void*) final {
     volume_ = 1.0 / 3.0 * M_PI * cone.a() * cone.b() * cone.height();
   }
-
+  void ImplementGeometry(const HeightField&, void*) final {
+    volume_ = std::numeric_limits<double>::infinity();
+  }
   double volume() const { return volume_; }
 
  private:

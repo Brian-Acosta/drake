@@ -218,7 +218,8 @@ class Ellipsoid final : public Shape {
   double c() const { return radii_(2); }
 
  private:
-  Vector3<double> radii_;
+
+  <double> radii_;
 };
 
 /** Definition of a half space. In its canonical frame, the plane defining the
@@ -353,6 +354,48 @@ class MeshcatCone final : public Shape {
   double b_{};
 };
 
+/** Definition of a rectangular Heightfield. It is centered at the origin,
+ * and extends to $\pm$ x_dim/2 in the x direction, and $\pm y_dim/2 in the
+ * y direction, with heights representing the distance of the vertices from the
+ * xy plane at the grid points
+ */
+class HeightField final : public Shape {
+ public:
+  DRAKE_DEFAULT_COPY_AND_MOVE_AND_ASSIGN(HeightField)
+
+  /** Constructs the parameterized heightmap.
+   * @throws std::exception if min(`height`) < -`depth`
+   */
+  explicit HeightField(MatrixX<double> heights, double dim_x, double dim_y);9
+
+  /**
+   * See HalfSpace::MakePose
+   */
+  static math::RigidTransform<double> MakePose(const Vector3<double>& Hz_dir_F,
+                                               const Vector3<double>& p_FB);
+  MatrixX<double> heights() { return  heights_; }
+  VectorX<double> x_grid() { return x_grid_; }
+  VectorX<double> y_grid() { return y_grid_; }
+  double dim_x() { return dim_x_; }
+  double dim_y() { return dim_y_; }
+  double x_resolution() { return x_resolution_; }
+  double y_resolution() {return y_resolution_; }
+  int nx() { return nx_; }
+  int ny() { return ny_; }
+
+ private:
+  MatrixX<double> heights_;
+  VectorX<double> x_grid_;
+  VectorX<double> y_grid_;
+  double dim_x_{};
+  double dim_y_{};
+  double x_resolution_{};
+  double y_resolution_{};
+  int nx_;
+  int ny_;
+
+};
+
 /** The interface for converting shape descriptions to real shapes. Any entity
  that consumes shape descriptions _must_ implement this interface.
 
@@ -415,7 +458,7 @@ class ShapeReifier {
   virtual void ImplementGeometry(const Mesh& mesh, void* user_data);
   virtual void ImplementGeometry(const Convex& convex, void* user_data);
   virtual void ImplementGeometry(const MeshcatCone& cone, void* user_data);
-
+  virtual void ImplementGeometry(const HeightField& hfield, void* user_data);
  protected:
   DRAKE_DEFAULT_COPY_AND_MOVE_AND_ASSIGN(ShapeReifier)
   ShapeReifier() = default;
@@ -454,6 +497,7 @@ class ShapeName final : public ShapeReifier {
   void ImplementGeometry(const Mesh&, void*) final;
   void ImplementGeometry(const Convex&, void*) final;
   void ImplementGeometry(const MeshcatCone&, void*) final;
+  void ImplementGeometry(const HeightField& hfield, void* user_data);
 
   //@}
 
