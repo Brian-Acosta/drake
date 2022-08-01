@@ -154,10 +154,6 @@ struct ReifyData {
   const ProximityProperties& properties;
 };
 
-struct HeighFieldData {
-  unique_ptr<HeightField>
-};
-
 // Helper functions to facilitate exercising FCL's broadphase code. FCL has
 // inconsistent usage of `const`. As such, even though the broadphase structures
 // do not change during collision and distance queries, they are nevertheless
@@ -436,11 +432,7 @@ class ProximityEngine<T>::Impl : public ShapeReifier {
     // objects from the same file.
   }
 
-  void ImplementGeometry(const HeightField& hfield, void* user_data) override {
-    auto fcl_box = std::make_shared<fcl::Boxd>(
-        hfield.dim_x(), hfield.dim_y(), hfield.heights().maxCoeff());
-
-  }
+  /// TODO (@Brian-Acosta) ImplementGeometry definition for heightfield
 
   std::vector<SignedDistancePair<T>> ComputeSignedDistancePairwiseClosestPoints(
       const std::unordered_map<GeometryId, RigidTransform<T>>& X_WGs,
