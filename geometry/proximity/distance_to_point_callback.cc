@@ -154,6 +154,27 @@ void ComputeDistanceToPrimitive(const fcl::Capsuled& capsule,
   }
 }
 
+template <typename T>
+void ComputeDistanceToPrimitive(const fcl::HeightFieldd& height_field,
+                                const math::RigidTransform<T>& X_WG,
+                                const Vector3<T>& p_WQ, Vector3<T>* p_GN,
+                                T* distance, Vector3<T>* grad_W) {
+  // view Q from the height field canonical frame
+  const Vector3<T> p_GQ(X_WG.inverse() * p_WQ);
+  int idxx = static_cast<int>(
+      ExtractDoubleOrThrow(p_GQ.x()) / height_field.dim_x);
+  int idxy = static_cast<int>(
+      ExtractDoubleOrThrow(p_GQ.x()) / height_field.dim_y);
+
+  // Get the distance if the x and y dimensions are inbounds
+  if (idxx > 0 && idxx < height_field.nx) {
+    if (idxy > 0 && idxy < height_field.ny) {
+      
+    }
+  }
+
+}
+
 #define INSTANTIATE_DISTANCE_TO_PRIMITIVE(Shape, S)                         \
 template void ComputeDistanceToPrimitive<S>(                                \
     const fcl::Shape&, const math::RigidTransform<S>&, const Vector3<S>&,   \
@@ -377,6 +398,15 @@ SignedDistanceToPoint<T> DistanceToPoint<T>::operator()(
   return SignedDistanceToPoint<T>{geometry_id_, p_GN_G, distance, grad_W};
 }
 
+template <typename T>
+SignedDistanceToPoint<T> DistanceToPoint<T>::operator()(
+    const fcl::HeightFieldd& height_field) {
+  T distance{};
+  Vector3<T> p_GN_G, grad_W;
+  ComputeDistanceToPrimitive(height_field, X_WG_, p_WQ_, &p_GN_G, &distance, &grad_W);
+
+  return SignedDistanceToPoint<T>{geometry_id_, p_GN_G, distance, grad_W};
+}
 
 template <typename T>
 template <int dim, typename U>

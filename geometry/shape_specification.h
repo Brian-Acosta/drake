@@ -378,7 +378,7 @@ class HeightField final : public Shape {
   double dim_x() const { return dim_x_; }
   double dim_y() const { return dim_y_; }
   double x_resolution() const { return x_resolution_; }
-  double y_resolution() const {return y_resolution_; }
+  double y_resolution() const { return y_resolution_; }
   int nx() const { return nx_; }
   int ny() const { return ny_; }
 

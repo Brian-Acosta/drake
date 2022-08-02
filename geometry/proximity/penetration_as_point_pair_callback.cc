@@ -87,6 +87,11 @@ class PenetrationPairFunctor {
     SphereShapePenetration(sphere_A, capsule_B, result);
   }
 
+  void operator()(const fcl::Sphered& sphere_A, const fcl::HeightFieldd& height_field_B,
+                  PenetrationAsPointPair<T>* result) {
+    SphereShapePenetration(sphere_A, height_field_B, result);
+  }
+
   //@}
 
  private:
@@ -283,6 +288,11 @@ void ComputeNarrowPhasePenetration(const fcl::CollisionObjectd& a,
     case fcl::GEOM_CAPSULE: {
       const auto& capsule_O = *static_cast<const fcl::Capsuled*>(o_geometry);
       calc_penetration_pair(sphere_S, capsule_O, result);
+      break;
+    }
+    case fcl::GEOM_HEIGHT_FIELD: {
+      const auto& height_field_O = *static_cast<const fcl::HeightFieldd*>(o_geometry);
+      calc_penetration_pair(sphere_S, height_field_O, result);
       break;
     }
     case fcl::GEOM_ELLIPSOID:

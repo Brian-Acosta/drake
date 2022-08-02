@@ -42,6 +42,8 @@ std::string GetGeometryName(const fcl::CollisionObjectd& object) {
       return "Halfspace";
     case fcl::GEOM_TRIANGLE:
       return "Mesh";
+    case fcl::GEOM_HEIGHT_FIELD:
+      return "HeightField";
     case fcl::GEOM_OCTREE:
       return "Octtree";
     case fcl::NODE_COUNT:

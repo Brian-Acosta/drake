@@ -126,6 +126,14 @@ void ComputeDistanceToPrimitive(const fcl::Capsuled& capsule,
                                 const Vector3<T>& p_WQ, Vector3<T>* p_GN,
                                 T* distance, Vector3<T>* grad_W);
 
+
+/* Overload of ComputeDistanceToPrimitive() for height field primitive. */
+template <typename T>
+void ComputeDistanceToPrimitive(const fcl::HeightFieldd& height_field,
+                               const math::RigidTransform<T>& X_WG,
+                               const Vector3<T>& p_WQ, Vector3<T>* p_GN,
+                               T* distance, Vector3<T>* grad_W);
+
 // TODO(DamrongGuoy): Add overloads for all supported geometries.
 
 //@}
@@ -167,6 +175,9 @@ class DistanceToPoint {
 
   /* Overload to compute distance to a sphere.  */
   SignedDistanceToPoint<T> operator()(const fcl::Sphered& sphere);
+
+  /* Overload to compute distance to a height map */
+  SignedDistanceToPoint<T> operator()(const fcl::HeightFieldd& height_field);
 
   /* Reports the "sign" of x with a small modification; Sign(0) --> 1.
    @tparam U  Templated to allow DistanceToPoint<AutoDiffXd> to still compute
