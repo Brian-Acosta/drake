@@ -164,12 +164,54 @@ void ComputeDistanceToPrimitive(const fcl::HeightFieldd& height_field,
   int idxx = static_cast<int>(
       ExtractDoubleOrThrow(p_GQ.x()) / height_field.dim_x);
   int idxy = static_cast<int>(
-      ExtractDoubleOrThrow(p_GQ.x()) / height_field.dim_y);
+      ExtractDoubleOrThrow(p_GQ.y()) / height_field.dim_y);
 
   // Get the distance if the x and y dimensions are inbounds
   if (idxx > 0 && idxx < height_field.nx) {
     if (idxy > 0 && idxy < height_field.ny) {
-      
+      // make a list of all neighboring triangles
+      std::vector<std::vector<Vector3<T>>> triangles_to_check;
+      for (int x = std::max(idxx - 1, 0); x <= idxx +1 && x < height_field.nx - 1; x++) {
+        for (int y = std::max(idxy - 1, 0); y <= idxy +1 && y < height_field.ny - 1; y++) {
+          Vector3<T> ul(
+              height_field.x_grid(x),
+              height_field.y_grid(y),
+              height_field.heights(x, y));
+          Vector3<T> bl(
+              height_field.x_grid(x+1),
+              height_field.y_grid(y),
+              height_field.heights(x+1, y));
+          Vector3<T> ur(
+              height_field.x_grid(x),
+              height_field.y_grid(y+1),
+              height_field.heights(x, y+1));
+          Vector3<T> br(
+              height_field.x_grid(x+1),
+              height_field.y_grid(y+1),
+              height_field.heights(x+1, y+1));
+          triangles_to_check.push_back({ul, bl, ur});
+          triangles_to_check.push_back({br, ur, bl});
+        }
+      }
+      // Get the distance to each triangle using a zero radius sphere
+      std::vector<T> distances;
+      distances.reserve(triangles_to_check.size());
+      fcl::Sphered sphere_Q(0.0);
+      for (const auto& triangle : triangles_to_check) {
+        double unsigned_distance;
+        fcl::detail::sphereTriangleDistance(
+            sphere_Q, math::RigidTransformd(p_GQ).GetAsIsometry3(),
+            ExtractDoubleOrThrow(triangle.at(0)),
+            ExtractDoubleOrThrow(triangle.at(1)),
+            ExtractDoubleOrThrow(triangle.at(2)),
+            &unsigned_distance);
+        distances.push_back(unsigned_distance);
+      }
+      auto min_it = std::min_element(distances.begin(), distances.end());
+      int min_triangle_idx = std::distance(distances.begin(), min_it);
+
+      // Get the signed distance computation from the closest triangle
+      fcl::detail::sphereTriangleIntersect()
     }
   }
 

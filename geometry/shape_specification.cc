@@ -151,13 +151,13 @@ MeshcatCone::MeshcatCone(double height, double a, double b)
 HeightField::HeightField(MatrixX<double> heights, double dim_x, double dim_y)
     : Shape(ShapeTag<HeightField>()),
     heights_(heights),
-    x_grid_(VectorX<double>::LinSpaced(heights.cols(), -dim_x / 2, dim_x / 2)),
-    y_grid_(VectorX<double>::LinSpaced(heights.rows(), -dim_y / 2, dim_y / 2)),
+    x_grid_(VectorX<double>::LinSpaced(heights.rows(), -dim_x / 2, dim_x / 2)),
+    y_grid_(VectorX<double>::LinSpaced(heights.cols(), -dim_y / 2, dim_y / 2)),
     dim_x_(dim_x), dim_y_(dim_y),
-    x_resolution_(dim_x / (heights.cols() - 1)),
-    y_resolution_(dim_y / (heights.rows() - 1)),
-    nx_(heights.cols()),
-    ny_(heights.rows())
+    x_resolution_(dim_x / (heights.rows() - 1)),
+    y_resolution_(dim_y / (heights.cols() - 1)),
+    nx_(heights.rows()),
+    ny_(heights.cols())
     {
   if (dim_x <= 0 || dim_y <= 0) {
     throw std::logic_error(fmt::format(
