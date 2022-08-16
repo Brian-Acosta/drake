@@ -335,6 +335,7 @@ class Geometries final : public ShapeReifier {
   void ImplementGeometry(const Ellipsoid& ellipsoid, void* user_data) override;
   void ImplementGeometry(const Mesh&, void*) override;
   void ImplementGeometry(const Convex& convex, void* user_data) override;
+  void ImplementGeometry(const HeightField& height_field, void* user_data)  override;
 
   template <typename ShapeType>
   void MakeShape(const ShapeType& shape, const ReifyData& data);

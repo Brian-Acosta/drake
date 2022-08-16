@@ -160,47 +160,50 @@ void ComputeDistanceToPrimitive(const fcl::HeightFieldd& height_field,
                                 const Vector3<T>& p_WQ, Vector3<T>* p_GN,
                                 T* distance, Vector3<T>* grad_W) {
   // view Q from the height field canonical frame
-  const Vector3<T> p_GQ(X_WG.inverse() * p_WQ);
+  const Vector3<T> p_GQ_G(X_WG.inverse() * p_WQ);
   int idxx = static_cast<int>(
-      ExtractDoubleOrThrow(p_GQ.x()) / height_field.dim_x);
+      ExtractDoubleOrThrow(p_GQ_G.x()) / height_field.dim_x);
   int idxy = static_cast<int>(
-      ExtractDoubleOrThrow(p_GQ.y()) / height_field.dim_y);
+      ExtractDoubleOrThrow(p_GQ_G.y()) / height_field.dim_y);
 
   // Get the distance if the x and y dimensions are inbounds
   if (idxx > 0 && idxx < height_field.nx - 1) {
     if (idxy > 0 && idxy < height_field.ny - 1) {
       // make a list of all neighboring triangles
       std::vector<std::vector<Vector3<T>>> triangles_to_check;
-      for (int x = std::max(idxx - 1, 0); x <= idxx +1 && x < height_field.nx - 1; x++) {
-        for (int y = std::max(idxy - 1, 0); y <= idxy +1 && y < height_field.ny - 1; y++) {
+      for (int x = std::max(idxx - 1, 0);
+           x <= idxx + 1 && x < height_field.nx - 1; x++) {
+        for (int y = std::max(idxy - 1, 0);
+             y <= idxy + 1 && y < height_field.ny - 1; y++) {
           Vector3<T> ul(
               height_field.x_grid(x),
               height_field.y_grid(y),
               height_field.heights(x, y));
           Vector3<T> bl(
-              height_field.x_grid(x+1),
+              height_field.x_grid(x + 1),
               height_field.y_grid(y),
-              height_field.heights(x+1, y));
+              height_field.heights(x + 1, y));
           Vector3<T> ur(
               height_field.x_grid(x),
-              height_field.y_grid(y+1),
-              height_field.heights(x, y+1));
+              height_field.y_grid(y + 1),
+              height_field.heights(x, y + 1));
           Vector3<T> br(
-              height_field.x_grid(x+1),
-              height_field.y_grid(y+1),
-              height_field.heights(x+1, y+1));
+              height_field.x_grid(x + 1),
+              height_field.y_grid(y + 1),
+              height_field.heights(x + 1, y + 1));
           triangles_to_check.push_back({ul, bl, ur});
           triangles_to_check.push_back({br, ur, bl});
         }
       }
       // Get the distance to each triangle using a zero radius sphere
-      std::vector<T> distances;
+      std::vector<double> distances;
       distances.reserve(triangles_to_check.size());
       fcl::Sphered sphere_Q(0.0);
-      for (const auto& triangle : triangles_to_check) {
+      for (const auto &triangle : triangles_to_check) {
         double unsigned_distance;
         fcl::detail::sphereTriangleDistance(
-            sphere_Q, math::RigidTransformd(p_GQ).GetAsIsometry3(),
+            sphere_Q,
+            math::RigidTransformd(ExtractDoubleOrThrow(p_GQ_G)).GetAsIsometry3(),
             ExtractDoubleOrThrow(triangle.at(0)),
             ExtractDoubleOrThrow(triangle.at(1)),
             ExtractDoubleOrThrow(triangle.at(2)),
@@ -211,18 +214,26 @@ void ComputeDistanceToPrimitive(const fcl::HeightFieldd& height_field,
       int min_triangle_idx = std::distance(distances.begin(), min_it);
 
       // Get the signed distance computation from the closest triangle
-      auto& intersection_triangle = triangles_to_check.at(min_triangle_idx);
+      auto &intersection_triangle = triangles_to_check.at(min_triangle_idx);
       auto res = DistanceToPoint<T>::ComputeDistanceToHeightFieldTriangle(
-          p_GQ, intersection_triangle.at(0), intersection_triangle.at(1),
+          p_GQ_G, intersection_triangle.at(0), intersection_triangle.at(1),
           intersection_triangle.at(2));
-      *p_GN << res[0];
-      *grad_W << X_WG.rotation() * res[1];
-      *distance = res[2];
+      *p_GN << std::get<0>(res);
+      *grad_W << X_WG.rotation() * std::get<1>(res);
+      *distance = std::get<2>(res);
       return;
     }
   }
-  // Otherwise give the distance to the heightmap bounding box
 
+  // Otherwise give the distance to the heightmap bounding box
+  Vector3<T> p_GN_G, grad_G;
+  bool is_Q_on_edge_or_vertex{};
+  std::tie(p_GN_G, grad_G, is_Q_on_edge_or_vertex) =
+      DistanceToPoint<T>::ComputeDistanceToBox(
+          height_field.aabb_local.max_, p_GQ_G);
+  *grad_W << X_WG.rotation() * grad_G;
+  const Vector3<T> p_WN = X_WG * p_GN_G;
+  *distance = grad_W->dot(p_WQ - p_WN);
 }
 
 #define INSTANTIATE_DISTANCE_TO_PRIMITIVE(Shape, S)                         \
@@ -568,14 +579,15 @@ DistanceToPoint<T>::ComputeDistanceToBox(const Vector<double, dim>& h,
 }
 
 template<typename T>
-std::tuple<Vector3<T>, Vector3<T>, T> ComputeDistanceToHeightFieldTriangle(
+std::tuple<Vector3<T>, Vector3<T>, T>
+DistanceToPoint<T>::ComputeDistanceToHeightFieldTriangle(
     const Vector3<T>& p_GQ_G, const Vector3<T>& G1, const Vector3<T>& G2,
     const Vector3<T>& G3) {
   Vector3<T> p_GN_G;
   Vector3<T> grad_G;
   T distance;
-  fcl::Projectd::ProjectResult result;
-  result = fcl::Projectd::projectTriangle(G1, G2, G3, p_GQ_G);
+  typename fcl::detail::Project<T>::ProjectResult result;
+  result = fcl::detail::Project<T>::projectTriangle(G1, G2, G3, p_GQ_G);
   Vector3<T> n = (G2 - G1).cross(G3 - G1);
   p_GN_G = G1 * result.parameterization[0] + G2 * result.parameterization[1] +
       G3 * result.parameterization[2];
@@ -585,7 +597,7 @@ std::tuple<Vector3<T>, Vector3<T>, T> ComputeDistanceToHeightFieldTriangle(
   if (n.dot(grad_G) < 0) {
     distance *= -1.0;
   }
-  return std::tie(p_GN_G, grad_G, distance);
+  return std::make_tuple(p_GN_G, grad_G, distance);
 }
 
 bool ScalarSupport<double>::is_supported(fcl::NODE_TYPE node_type) {
@@ -596,6 +608,7 @@ bool ScalarSupport<double>::is_supported(fcl::NODE_TYPE node_type) {
     case fcl::GEOM_ELLIPSOID:
     case fcl::GEOM_HALFSPACE:
     case fcl::GEOM_SPHERE:
+    case fcl::GEOM_HEIGHT_FIELD:
       return true;
     default:
       return false;

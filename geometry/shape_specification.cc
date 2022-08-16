@@ -148,7 +148,8 @@ MeshcatCone::MeshcatCone(double height, double a, double b)
   }
 }
 
-HeightField::HeightField(MatrixX<double> heights, double dim_x, double dim_y)
+HeightField::HeightField(MatrixX<double> heights, double dim_x, double dim_y,
+                         double depth)
     : Shape(ShapeTag<HeightField>()),
     heights_(heights),
     x_grid_(VectorX<double>::LinSpaced(heights.rows(), -dim_x / 2, dim_x / 2)),
@@ -156,6 +157,7 @@ HeightField::HeightField(MatrixX<double> heights, double dim_x, double dim_y)
     dim_x_(dim_x), dim_y_(dim_y),
     x_resolution_(dim_x / (heights.rows() - 1)),
     y_resolution_(dim_y / (heights.cols() - 1)),
+    depth_(depth),
     nx_(heights.rows()),
     ny_(heights.cols())
     {

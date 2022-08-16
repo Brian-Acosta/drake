@@ -433,6 +433,12 @@ class ProximityEngine<T>::Impl : public ShapeReifier {
   }
 
   /// TODO (@Brian-Acosta) ImplementGeometry definition for heightfield
+  void ImplementGeometry(const HeightField& hfield, void* user_data) override {
+    auto fcl_hfield = make_shared<fcl::HeightFieldd>(
+        hfield.heights(), hfield.dim_x(), hfield.dim_y(), hfield.depth());
+    TakeShapeOwnership(fcl_hfield, user_data);
+    ProcessHydroelastic(hfield, user_data);
+  }
 
   std::vector<SignedDistancePair<T>> ComputeSignedDistancePairwiseClosestPoints(
       const std::unordered_map<GeometryId, RigidTransform<T>>& X_WGs,

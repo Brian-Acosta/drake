@@ -96,6 +96,10 @@ void Geometries::ImplementGeometry(const Convex& convex, void* user_data) {
   MakeShape(convex, *static_cast<ReifyData*>(user_data));
 }
 
+void Geometries::ImplementGeometry(const HeightField& height_field, void* user_data) {
+  MakeShape(height_field, *static_cast<ReifyData*>(user_data));
+}
+
 template <typename ShapeType>
 void Geometries::MakeShape(const ShapeType& shape, const ReifyData& data) {
   switch (data.type) {

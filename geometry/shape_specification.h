@@ -365,7 +365,8 @@ class HeightField final : public Shape {
   /** Constructs the parameterized heightmap.
    * @throws std::exception if min(`height`) < -`depth`
    */
-  explicit HeightField(MatrixX<double> heights, double dim_x, double dim_y);
+  explicit HeightField(MatrixX<double> heights, double dim_x, double dim_y,
+                       double depth);
 
   /**
    * See HalfSpace::MakePose
@@ -379,6 +380,7 @@ class HeightField final : public Shape {
   double dim_y() const { return dim_y_; }
   double x_resolution() const { return x_resolution_; }
   double y_resolution() const { return y_resolution_; }
+  double depth() const { return depth_; }
   int nx() const { return nx_; }
   int ny() const { return ny_; }
 
@@ -390,6 +392,7 @@ class HeightField final : public Shape {
   double dim_y_{};
   double x_resolution_{};
   double y_resolution_{};
+  double depth_;
   int nx_;
   int ny_;
 
