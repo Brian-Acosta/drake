@@ -219,6 +219,17 @@ class DistanceToPoint {
   static std::tuple<Vector<T, dim>, Vector<T, dim>, bool> ComputeDistanceToBox(
       const Vector<double, dim>& h, const Vector<T, dim>& p_GQ_G);
 
+  /*  Calculates the signed distance from a point to triangle,
+   * with vertices G1, G2, G3,  located within a heightmap G.
+   * @param p_GQ_G   The position of the query point Q in G's frame.
+   * @param G1 G2, G3    The position of the vertices in G's frame.
+   * @retval {p_GN_G, grad_G, is_Q_on_edge_or_vertex}   The tuple of the position
+                   of the nearest point N in G's frame and the gradient vector
+                   in the same frame G, together with the signed distance */
+  static std::tuple<Vector3<T>, Vector3<T>, T> ComputeDistanceToHeightFieldTriangle(
+      const Vector3<T>& p_GQ_G, const Vector3<T>& G1, const Vector3<T>& G2,
+      const Vector3<T>& G3);
+
  private:
   // The id of the geometry G.
   const GeometryId geometry_id_;

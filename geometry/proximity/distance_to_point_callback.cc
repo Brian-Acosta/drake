@@ -167,8 +167,8 @@ void ComputeDistanceToPrimitive(const fcl::HeightFieldd& height_field,
       ExtractDoubleOrThrow(p_GQ.y()) / height_field.dim_y);
 
   // Get the distance if the x and y dimensions are inbounds
-  if (idxx > 0 && idxx < height_field.nx) {
-    if (idxy > 0 && idxy < height_field.ny) {
+  if (idxx > 0 && idxx < height_field.nx - 1) {
+    if (idxy > 0 && idxy < height_field.ny - 1) {
       // make a list of all neighboring triangles
       std::vector<std::vector<Vector3<T>>> triangles_to_check;
       for (int x = std::max(idxx - 1, 0); x <= idxx +1 && x < height_field.nx - 1; x++) {
@@ -211,9 +211,17 @@ void ComputeDistanceToPrimitive(const fcl::HeightFieldd& height_field,
       int min_triangle_idx = std::distance(distances.begin(), min_it);
 
       // Get the signed distance computation from the closest triangle
-      fcl::detail::sphereTriangleIntersect()
+      auto& intersection_triangle = triangles_to_check.at(min_triangle_idx);
+      auto res = DistanceToPoint<T>::ComputeDistanceToHeightFieldTriangle(
+          p_GQ, intersection_triangle.at(0), intersection_triangle.at(1),
+          intersection_triangle.at(2));
+      *p_GN << res[0];
+      *grad_W << X_WG.rotation() * res[1];
+      *distance = res[2];
+      return;
     }
   }
+  // Otherwise give the distance to the heightmap bounding box
 
 }
 
@@ -557,6 +565,27 @@ DistanceToPoint<T>::ComputeDistanceToBox(const Vector<double, dim>& h,
   }
 
   return std::make_tuple(p_GN_G, grad_G, is_Q_on_edge_or_vertex);
+}
+
+template<typename T>
+std::tuple<Vector3<T>, Vector3<T>, T> ComputeDistanceToHeightFieldTriangle(
+    const Vector3<T>& p_GQ_G, const Vector3<T>& G1, const Vector3<T>& G2,
+    const Vector3<T>& G3) {
+  Vector3<T> p_GN_G;
+  Vector3<T> grad_G;
+  T distance;
+  fcl::Projectd::ProjectResult result;
+  result = fcl::Projectd::projectTriangle(G1, G2, G3, p_GQ_G);
+  Vector3<T> n = (G2 - G1).cross(G3 - G1);
+  p_GN_G = G1 * result.parameterization[0] + G2 * result.parameterization[1] +
+      G3 * result.parameterization[2];
+  grad_G = p_GQ_G - p_GN_G;
+  // get distance and sign
+  distance = result.sqr_distance > 0 ? sqrt(result.sqr_distance) : 0.0;
+  if (n.dot(grad_G) < 0) {
+    distance *= -1.0;
+  }
+  return std::tie(p_GN_G, grad_G, distance);
 }
 
 bool ScalarSupport<double>::is_supported(fcl::NODE_TYPE node_type) {
