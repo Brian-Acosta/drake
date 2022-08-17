@@ -89,6 +89,13 @@ shared_ptr<fcl::ShapeBased> CopyShapeOrThrow(
           convex.getFaceCount(),
           make_shared<const std::vector<int>>(convex.getFaces()));
     }
+    case fcl::GEOM_HEIGHT_FIELD: {
+      const auto &height_field =
+          dynamic_cast<const fcl::HeightFieldd &>(geometry);
+      return make_shared<fcl::HeightFieldd>(
+          height_field.heights, height_field.dim_x, height_field.dim_y,
+          height_field.depth);
+    }
     case fcl::GEOM_CONE:
     case fcl::GEOM_PLANE:
     case fcl::GEOM_TRIANGLE:
