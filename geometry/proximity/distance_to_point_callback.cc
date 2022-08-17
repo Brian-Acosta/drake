@@ -1,3 +1,4 @@
+#include <iostream>
 #include "drake/geometry/proximity/distance_to_point_callback.h"
 
 #include "drake/common/default_scalars.h"
@@ -166,9 +167,10 @@ void ComputeDistanceToPrimitive(const fcl::HeightFieldd& height_field,
   int idxy = static_cast<int>(
       ExtractDoubleOrThrow(p_GQ_G.y()) / height_field.dim_y);
 
+
   // Get the distance if the x and y dimensions are inbounds
-  if (idxx > 0 && idxx < height_field.nx - 1) {
-    if (idxy > 0 && idxy < height_field.ny - 1) {
+  if (idxx >=0 && idxx < height_field.nx - 1) {
+    if (idxy >= 0 && idxy < height_field.ny - 1) {
       // make a list of all neighboring triangles
       std::vector<std::vector<Vector3<T>>> triangles_to_check;
       for (int x = std::max(idxx - 1, 0);
@@ -210,6 +212,7 @@ void ComputeDistanceToPrimitive(const fcl::HeightFieldd& height_field,
             &unsigned_distance);
         distances.push_back(unsigned_distance);
       }
+      std::cout << "\n";
       auto min_it = std::min_element(distances.begin(), distances.end());
       int min_triangle_idx = std::distance(distances.begin(), min_it);
 
@@ -221,6 +224,7 @@ void ComputeDistanceToPrimitive(const fcl::HeightFieldd& height_field,
       *p_GN << std::get<0>(res);
       *grad_W << X_WG.rotation() * std::get<1>(res);
       *distance = std::get<2>(res);
+      std::cout << "distance: " << *distance << std::endl;
       return;
     }
   }
@@ -589,6 +593,7 @@ DistanceToPoint<T>::ComputeDistanceToHeightFieldTriangle(
   typename fcl::detail::Project<T>::ProjectResult result;
   result = fcl::detail::Project<T>::projectTriangle(G1, G2, G3, p_GQ_G);
   Vector3<T> n = (G2 - G1).cross(G3 - G1);
+  std::cout << "Triangle Normal: " << n.transpose() << std::endl;
   p_GN_G = G1 * result.parameterization[0] + G2 * result.parameterization[1] +
       G3 * result.parameterization[2];
   grad_G = p_GQ_G - p_GN_G;
@@ -596,7 +601,9 @@ DistanceToPoint<T>::ComputeDistanceToHeightFieldTriangle(
   distance = result.sqr_distance > 0 ? sqrt(result.sqr_distance) : 0.0;
   if (n.dot(grad_G) < 0) {
     distance *= -1.0;
+    grad_G *= -1.0;
   }
+  grad_G.normalize();
   return std::make_tuple(p_GN_G, grad_G, distance);
 }
 
