@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Install development and runtime prerequisites for both binary and source
-# distributions of Drake on Ubuntu 20.04 (Focal).
+# distributions of Drake on Ubuntu 20.04 (Focal) or 22.04 (Jammy).
 
 set -euo pipefail
 
@@ -34,10 +34,6 @@ while [ "${1:-}" != "" ]; do
     # i.e., those prerequisites that are dependencies of bazel run //doc:build.
     --with-doc-only)
       source_distribution_args+=(--with-doc-only)
-      ;;
-    # TODO(betsymcphail): Remove this deprecated option on or after 2022-08-01
-    --with-kcov)
-      source_distribution_args+=(--with-kcov)
       ;;
     # Install prerequisites that are only needed for --config clang, i.e.,
     # opts-in to the ability to compile Drake's C++ code using Clang.

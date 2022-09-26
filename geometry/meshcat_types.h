@@ -367,6 +367,24 @@ struct SetTransformData {
   MSGPACK_DEFINE_MAP(type, path, matrix);
 };
 
+// Note that this struct is unique to Drake's integration of meshcat; it is not
+// part of upstream meshcat.js. We handle it directly within meshcat.html,
+// without ever feeding it into meshcat.js.
+struct RealtimeRateData {
+  std::string type{"realtime_rate"};
+  double rate{};
+  MSGPACK_DEFINE_MAP(type, rate);
+};
+
+// Note that this struct is unique to Drake's integration of meshcat; it is not
+// part of upstream meshcat.js. We handle it directly within meshcat.html,
+// without ever feeding it into meshcat.js.
+struct ShowRealtimeRate {
+  std::string type{"show_realtime_rate"};
+  bool show{true};
+  MSGPACK_DEFINE_MAP(type, show);
+};
+
 struct DeleteData {
   std::string type{"delete"};
   std::string path;
@@ -387,7 +405,8 @@ struct SetButtonControl {
   int num_clicks{0};
   std::string name;
   std::string callback;
-  MSGPACK_DEFINE_MAP(type, name, callback);
+  std::string keycode1{};
+  MSGPACK_DEFINE_MAP(type, name, callback, keycode1);
 };
 
 struct SetSliderControl {
@@ -398,7 +417,10 @@ struct SetSliderControl {
   double min{};
   double max{};
   double step{};
-  MSGPACK_DEFINE_MAP(type, name, callback, value, min, max, step);
+  std::string keycode1{};
+  std::string keycode2{};
+  MSGPACK_DEFINE_MAP(type, name, callback, value, min, max, step, keycode1,
+                     keycode2);
 };
 
 struct SetSliderValue {

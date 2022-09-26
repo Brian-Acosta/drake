@@ -30,7 +30,7 @@ def _gfortran_impl(repo_ctx):
     os_result = determine_os(repo_ctx)
     if os_result.error != None:
         fail(os_result.error)
-    if os_result.is_macos:
+    if os_result.is_macos or os_result.is_macos_wheel:
         suffix = ".dylib"
     else:
         suffix = ".so"
@@ -38,15 +38,14 @@ def _gfortran_impl(repo_ctx):
     libgfortran_path = _find_library(repo_ctx, compiler, libgfortran)
 
     # The cc_library linking is different on Ubuntu vs macOS.
-    if os_result.is_macos:
+    if os_result.is_macos or os_result.is_macos_wheel:
         srcs = []
         linkopts = [
             "-L{}".format(repo_ctx.path(libgfortran_path).dirname),
             "-ldl",
             "-lgfortran",
         ]
-        arch_result = execute_or_fail(repo_ctx, ["/usr/bin/arch"])
-        if arch_result.stdout.strip() != "arm64":
+        if os_result.macos_arch_result != "arm64":
             linkopts.append("-lquadmath")
     else:
         libquadmath = "libquadmath{}".format(suffix)

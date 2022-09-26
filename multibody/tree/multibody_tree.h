@@ -5,6 +5,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -886,6 +887,10 @@ class MultibodyTree {
   // retrieve a local copy of their topology.
   const MultibodyTreeTopology& get_topology() const { return topology_; }
 
+  // See MultibodyPlant method.
+  std::vector<BodyIndex> GetBodiesKinematicallyAffectedBy(
+      const std::vector<JointIndex>& joint_indexes) const;
+
   // Returns the mobilizer model for joint with index `joint_index`. The index
   // is invalid if the joint is not modeled with a mobilizer.
   MobilizerIndex get_joint_mobilizer(JointIndex joint_index) const {
@@ -1136,6 +1141,12 @@ class MultibodyTree {
   Vector3<T> CalcCenterOfMassPositionInWorld(
       const systems::Context<T>& context,
       const std::vector<ModelInstanceIndex>& model_instances) const;
+
+  // See MultibodyPlant method.
+  SpatialInertia<T> CalcSpatialInertia(
+      const systems::Context<T>& context,
+      const Frame<T>& frame_F,
+      const std::vector<BodyIndex>& body_indexes) const;
 
   // See MultibodyPlant method.
   Vector3<T> CalcCenterOfMassTranslationalVelocityInWorld(
@@ -2472,6 +2483,27 @@ class MultibodyTree {
     DRAKE_DEMAND(topology_is_valid());
     return discrete_state_index_;
   }
+
+  // Calculates the total default mass of all bodies in a set of BodyIndex.
+  // @param[in] body_indexes A set of BodyIndex.
+  // @retval Total mass of all bodies in body_indexes or 0 if there is no mass.
+  double CalcTotalDefaultMass(const std::set<BodyIndex>& body_indexes) const;
+
+  // In the set of bodies associated with BodyIndex, returns true if any of
+  // the bodies have a NaN default rotational inertia.
+  // @param[in] body_indexes A set of BodyIndex.
+  bool IsAnyDefaultRotationalInertiaNaN(
+      const std::set<BodyIndex>& body_indexes) const;
+
+  // In the set of bodies associated with BodyIndex, returns true if all the
+  // bodies have a zero default rotational inertia.
+  // @param[in] body_indexes A set of BodyIndex.
+  bool AreAllDefaultRotationalInertiaZero(
+      const std::set<BodyIndex>& body_indexes) const;
+
+  // Throw an exception if there are bodies whose default mass or inertia
+  // properties will cause subsequent numerical problems.
+  void ThrowDefaultMassInertiaError() const;
 
  private:
   // Make MultibodyTree templated on every other scalar type a friend of

@@ -11,6 +11,7 @@
 #include "drake/geometry/query_results/contact_surface.h"
 #include "drake/multibody/contact_solvers/contact_solver.h"
 #include "drake/multibody/contact_solvers/contact_solver_results.h"
+#include "drake/multibody/plant/constraint_specs.h"
 #include "drake/multibody/plant/contact_jacobians.h"
 #include "drake/multibody/plant/coulomb_friction.h"
 #include "drake/multibody/plant/discrete_contact_pair.h"
@@ -20,10 +21,12 @@
 
 namespace drake {
 namespace multibody {
+
 template <typename T>
 class MultibodyPlant;
 
 namespace internal {
+
 template <typename T>
 class AccelerationKinematicsCache;
 
@@ -131,6 +134,17 @@ class DiscreteUpdateManager : public ScalarConvertibleComponent<T> {
     DoCalcDiscreteValues(context, updates);
   }
 
+  /* Publicly exposed MultibodyPlant private/protected methods.
+   @{ */
+
+  // N.B. Keep the spelling and order of declarations here identical to the
+  // MultibodyPlantDiscreteUpdateManagerAttorney spelling and order of same.
+
+  systems::CacheEntry& DeclareCacheEntry(std::string description,
+                                         systems::ValueProducer,
+                                         std::set<systems::DependencyTicket>);
+  /* @} */
+
  protected:
   /* Derived classes that support making a clone that uses double as a scalar
    type must implement this so that it creates a copy of the object with double
@@ -174,10 +188,6 @@ class DiscreteUpdateManager : public ScalarConvertibleComponent<T> {
 
   const MultibodyTree<T>& internal_tree() const;
 
-  systems::CacheEntry& DeclareCacheEntry(std::string description,
-                                         systems::ValueProducer,
-                                         std::set<systems::DependencyTicket>);
-
   const contact_solvers::internal::ContactSolverResults<T>&
   EvalContactSolverResults(const systems::Context<T>& context) const;
 
@@ -216,6 +226,9 @@ class DiscreteUpdateManager : public ScalarConvertibleComponent<T> {
 
   const std::unordered_map<geometry::GeometryId, BodyIndex>&
   geometry_id_to_body_index() const;
+
+  const std::vector<internal::CouplerConstraintSpecs<T>>&
+  coupler_constraints_specs() const;
   /* @} */
 
   /* Concrete DiscreteUpdateManagers must override these NVI Calc methods to
@@ -238,6 +251,7 @@ class DiscreteUpdateManager : public ScalarConvertibleComponent<T> {
   MultibodyPlant<T>* mutable_plant_{nullptr};
   systems::DiscreteStateIndex multibody_state_index_;
 };
+
 }  // namespace internal
 }  // namespace multibody
 }  // namespace drake

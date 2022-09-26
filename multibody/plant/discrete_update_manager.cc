@@ -9,6 +9,17 @@ namespace multibody {
 namespace internal {
 
 template <typename T>
+systems::CacheEntry& DiscreteUpdateManager<T>::DeclareCacheEntry(
+    std::string description, systems::ValueProducer value_producer,
+    std::set<systems::DependencyTicket> prerequisites_of_calc) {
+  DRAKE_DEMAND(mutable_plant_ != nullptr);
+  DRAKE_DEMAND(mutable_plant_ == plant_);
+  return MultibodyPlantDiscreteUpdateManagerAttorney<T>::DeclareCacheEntry(
+      mutable_plant_, std::move(description), std::move(value_producer),
+      std::move(prerequisites_of_calc));
+}
+
+template <typename T>
 std::unique_ptr<DiscreteUpdateManager<double>>
 DiscreteUpdateManager<T>::CloneToDouble() const {
   throw std::logic_error(
@@ -50,17 +61,6 @@ bool DiscreteUpdateManager<T>::is_cloneable_to_symbolic() const {
 template <typename T>
 const MultibodyTree<T>& DiscreteUpdateManager<T>::internal_tree() const {
   return MultibodyPlantDiscreteUpdateManagerAttorney<T>::internal_tree(plant());
-}
-
-template <typename T>
-systems::CacheEntry& DiscreteUpdateManager<T>::DeclareCacheEntry(
-    std::string description, systems::ValueProducer value_producer,
-    std::set<systems::DependencyTicket> prerequisites_of_calc) {
-  DRAKE_DEMAND(mutable_plant_ != nullptr);
-  DRAKE_DEMAND(mutable_plant_ == plant_);
-  return MultibodyPlantDiscreteUpdateManagerAttorney<T>::DeclareCacheEntry(
-      mutable_plant_, std::move(description), std::move(value_producer),
-      std::move(prerequisites_of_calc));
 }
 
 template <typename T>
@@ -159,6 +159,13 @@ const std::unordered_map<geometry::GeometryId, BodyIndex>&
 DiscreteUpdateManager<T>::geometry_id_to_body_index() const {
   return MultibodyPlantDiscreteUpdateManagerAttorney<
       T>::geometry_id_to_body_index(*plant_);
+}
+
+template <typename T>
+const std::vector<internal::CouplerConstraintSpecs<T>>&
+DiscreteUpdateManager<T>::coupler_constraints_specs() const {
+  return MultibodyPlantDiscreteUpdateManagerAttorney<
+      T>::coupler_constraints_specs(*plant_);
 }
 
 }  // namespace internal
