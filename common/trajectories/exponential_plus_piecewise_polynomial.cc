@@ -30,19 +30,6 @@ std::unique_ptr<Trajectory<T>> ExponentialPlusPiecewisePolynomial<T>::Clone()
 }
 
 template <typename T>
-MatrixX<T> ExponentialPlusPiecewisePolynomial<T>::DoEvalDerivative(
-    const T& t, int derivative_order) const {
-  int segment_index = this->get_segment_index(t);
-  MatrixX<T> ret = piecewise_polynomial_part_.EvalDerivative(t, derivative_order);
-  double tj = this->start_time(segment_index);
-  auto exponential = (A_ * (t - tj)).eval().exp().eval();
-  Eigen::MatrixPower<MatrixX<T>> Apow(A_);
-  ret.noalias() += K_ * Apow(derivative_order) *
-      exponential * alpha_.col(segment_index);
-  return ret;
-}
-
-template <typename T>
 MatrixX<T> ExponentialPlusPiecewisePolynomial<T>::value(const T& t) const {
   int segment_index = this->get_segment_index(t);
   MatrixX<T> ret = piecewise_polynomial_part_.value(t);
