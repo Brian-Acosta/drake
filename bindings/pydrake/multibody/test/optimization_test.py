@@ -1,3 +1,4 @@
+import copy
 import unittest
 import typing
 from collections import namedtuple
@@ -7,7 +8,9 @@ import numpy as np
 from pydrake.multibody.optimization import (
     CalcGridPointsOptions,
     CentroidalMomentumConstraint,
+    ContactWrenchFromForceInWorldFrameEvaluator,
     QuaternionEulerIntegrationConstraint,
+    SpatialVelocityConstraint,
     StaticEquilibriumProblem,
     Toppra,
     ToppraDiscretization,
@@ -25,10 +28,11 @@ from pydrake.multibody.tree import (
 )
 import pydrake.multibody.inverse_kinematics as ik
 import pydrake.solvers.mathematicalprogram as mp
-from pydrake.solvers.snopt import SnoptSolver
-from pydrake.systems.framework import DiagramBuilder_
+from pydrake.solvers import SnoptSolver
+from pydrake.systems.framework import DiagramBuilder, DiagramBuilder_
 from pydrake.geometry import (
     Box,
+    Role,
     Sphere,
 )
 from pydrake.math import RigidTransform
@@ -179,6 +183,73 @@ class TestQuaternionEulerIntegrationConstraint(unittest.TestCase):
         self.assertIsInstance(dut, mp.Constraint)
 
 
+class TestSpatialVelocityConstraint(unittest.TestCase):
+    def test(self):
+        masses = [1., 2]
+        box_sizes = [np.array([0.1, 0.1, 0.1]), np.array([0.1, 0.1, 0.2])]
+        env = construct_environment(masses, box_sizes)
+        context = env.plant.CreateDefaultContext()
+        w_AC_bounds = SpatialVelocityConstraint.AngularVelocityBounds()
+        w_AC_bounds.magnitude_lower = 0.2
+        w_AC_bounds.magnitude_upper = 0.4
+        w_AC_bounds.reference_direction = [1, 2, 3]
+        w_AC_bounds.theta_bound = np.pi / 4
+        dut = SpatialVelocityConstraint(
+            plant=env.plant,
+            frameA=env.plant.world_frame(),
+            v_AC_lower=[1, 2, 3],
+            v_AC_upper=[4, 5, 6],
+            frameB=env.plant.GetFrameByName("box0"),
+            p_BCo=[0.2, 0.3, 0.6],
+            plant_context=context)
+        self.assertIsInstance(dut, mp.Constraint)
+        np.testing.assert_array_almost_equal(dut.lower_bound(), [1, 2, 3])
+        np.testing.assert_array_almost_equal(dut.upper_bound(), [4, 5, 6])
+
+        dut = SpatialVelocityConstraint(
+            plant=env.plant,
+            frameA=env.plant.world_frame(),
+            v_AC_lower=[1, 2, 3],
+            v_AC_upper=[4, 5, 6],
+            frameB=env.plant.GetFrameByName("box0"),
+            p_BCo=[0.2, 0.3, 0.6],
+            plant_context=context,
+            w_AC_bounds=w_AC_bounds)
+        self.assertIsInstance(dut, mp.Constraint)
+        np.testing.assert_array_almost_equal(
+            dut.lower_bound(),
+            [1, 2, 3, 0.04, np.cos(np.pi / 4)])
+        np.testing.assert_array_almost_equal(
+            dut.upper_bound(), [4, 5, 6, 0.16, 1])
+
+
+class TestContactWrenchFromForceInWorldFrameEvaluator(unittest.TestCase):
+    def test(self):
+        builder = DiagramBuilder()
+        plant, scene_graph = AddMultibodyPlantSceneGraph(
+            builder, MultibodyPlant(time_step=0.01))
+        Parser(plant).AddModels(FindResourceOrThrow(
+                "drake/bindings/pydrake/multibody/test/two_bodies.sdf"))
+        plant.Finalize()
+        diagram = builder.Build()
+        ad_diagram = diagram.ToAutoDiffXd()
+        ad_plant = ad_diagram.GetSubsystemByName("plant")
+        ad_context = ad_diagram.CreateDefaultContext()
+        ad_plant_context = ad_plant.GetMyMutableContextFromRoot(ad_context)
+        inspector = scene_graph.model_inspector()
+        frame_id1 = inspector.GetGeometryIdByName(
+            plant.GetBodyFrameIdOrThrow(plant.GetBodyByName("body1").index()),
+            Role.kProximity, "two_bodies::body1_collision")
+        frame_id2 = inspector.GetGeometryIdByName(
+            plant.GetBodyFrameIdOrThrow(plant.GetBodyByName("body2").index()),
+            Role.kProximity, "two_bodies::body2_collision")
+        dut = ContactWrenchFromForceInWorldFrameEvaluator(
+            plant=ad_plant,
+            context=ad_plant_context,
+            geometry_id_pair=(frame_id1, frame_id2))
+        self.assertIsInstance(dut, mp.EvaluatorBase)
+
+
 class TestToppra(unittest.TestCase):
     def test_gridpoints(self):
         path = PiecewisePolynomial.CubicWithContinuousSecondDerivatives(
@@ -195,6 +266,9 @@ class TestToppra(unittest.TestCase):
         self.assertEqual(options.min_points, 100)
         options.min_points = 10
 
+        self.assertIn("max_err", repr(options))
+        copy.copy(options)
+
         grid_points = Toppra.CalcGridPoints(path=path, options=options)
         self.assertIsInstance(grid_points, np.ndarray)
 
@@ -203,7 +277,7 @@ class TestToppra(unittest.TestCase):
         file_path = FindResourceOrThrow(
             "drake/manipulation/models/iiwa_description/iiwa7/"
             "iiwa7_no_collision.sdf")
-        iiwa_id = Parser(plant).AddModelFromFile(file_path, "iiwa")
+        iiwa_id, = Parser(plant).AddModels(file_path)
         plant.WeldFrames(plant.world_frame(),
                          plant.GetFrameByName("iiwa_link_0", iiwa_id))
         plant.Finalize()

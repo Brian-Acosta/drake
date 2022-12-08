@@ -208,8 +208,12 @@ const MobilizerType<T>& MultibodyTree<T>::AddMobilizer(
 
   // Mark free bodies as needed.
   const BodyIndex outboard_body_index = mobilizer->outboard_body().index();
+  bool is_body_floating =
+      mobilizer->is_floating() &&
+      mobilizer->inboard_frame().body().index() == world_body().index();
+
   topology_.get_mutable_body(outboard_body_index).is_floating =
-      mobilizer->is_floating();
+      is_body_floating;
   topology_.get_mutable_body(outboard_body_index).has_quaternion_dofs =
       mobilizer->has_quaternion_dofs();
 
@@ -323,14 +327,16 @@ const JointType<T>& MultibodyTree<T>::AddJoint(
 
   const Frame<T>* frame_on_parent{nullptr};
   if (X_PF) {
-    frame_on_parent = &this->AddFrame<FixedOffsetFrame>(parent, *X_PF);
+    frame_on_parent = &this->AddFrame<FixedOffsetFrame>(
+       name + "_parent", parent, *X_PF);
   } else {
     frame_on_parent = &parent.body_frame();
   }
 
   const Frame<T>* frame_on_child{nullptr};
   if (X_BM) {
-    frame_on_child = &this->AddFrame<FixedOffsetFrame>(child, *X_BM);
+    frame_on_child = &this->AddFrame<FixedOffsetFrame>(
+        name + "_child", child, *X_BM);
   } else {
     frame_on_child = &child.body_frame();
   }

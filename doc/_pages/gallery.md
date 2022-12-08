@@ -11,7 +11,7 @@ aspect ratio.
 
 # Underactuated Robotics
 
-Drake is being used to teach [Underactuated Robotics](http://underactuated.csail.mit.edu/)
+Drake is being used to teach [Underactuated Robotics](https://underactuated.csail.mit.edu/)
 at MIT.  The course textbook has
 numerous examples of modeling, controlling, and analyzing many of the canonical
 problems in dynamics and control for robotics.
@@ -41,7 +41,7 @@ rigid-body contact.
 
 # Manipulation class at MIT
 
-Drake is being used to teach a new [course on manipulation at MIT](http://manipulation.csail.mit.edu/).
+Drake is being used to teach a new [course on manipulation at MIT](https://manipulation.csail.mit.edu/).
 The course software and materials give
 a complete autonomous manipulation pipeline, including deep and geometric
 perception, planning, and control.  Here is a highlight video of the class
@@ -99,6 +99,18 @@ penalty forces to model a closed loop topology, such as a four bar linkage.
 *Four Bar Source Code:* [https://github.com/RobotLocomotion/drake/tree/master/examples/multibody/four_bar](https://github.com/RobotLocomotion/drake/tree/master/examples/multibody/four_bar)
 
 *Strandbeest Source Code:* [https://github.com/RobotLocomotion/drake/tree/master/examples/multibody/strandbeest](https://github.com/RobotLocomotion/drake/tree/master/examples/multibody/strandbeest)
+
+# Hydroelastic contact between non-convex meshes
+
+Drake has an example of modeling hydroelastic contact between non-convex 
+meshes.
+
+{% include video.html
+  url = "https://www.youtube.com/embed/ItE5FNoNsTg"
+  full_width = true
+%}
+
+*Source Code:* [drake/examples/hydroelastic/python_nonconvex_mesh](https://github.com/RobotLocomotion/drake/tree/master/examples/hydroelastic/python_nonconvex_mesh)
 
 # Third Party Documentation / Tutorials
 

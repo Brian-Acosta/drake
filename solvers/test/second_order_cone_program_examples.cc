@@ -99,8 +99,8 @@ TestEllipsoidsSeparation::TestEllipsoidsSeparation() {
   VectorX<symbolic::Expression> lorentz_expr2(1 + R2_.cols());
   lorentz_expr1 << t_(0), R1_.transpose() * a_;
   lorentz_expr2 << t_(1), R2_.transpose() * a_;
-  prog_.AddLorentzConeConstraint(lorentz_expr1).evaluator();
-  prog_.AddLorentzConeConstraint(lorentz_expr2).evaluator();
+  prog_.AddLorentzConeConstraint(lorentz_expr1);
+  prog_.AddLorentzConeConstraint(lorentz_expr2);
   // a'*(x2 - x1) = 1
   prog_.AddLinearEqualityConstraint((x2_ - x1_).transpose(), 1.0, a_);
 
@@ -572,8 +572,7 @@ void TestSocpDualSolution1(const SolverInterface& solver,
 }
 
 void TestSocpDualSolution2(const SolverInterface& solver,
-                           const SolverOptions& solver_options, double tol,
-                           bool rotated_lorentz_cone_with_coefficient_two) {
+                           const SolverOptions& solver_options, double tol) {
   MathematicalProgram prog;
   auto x = prog.NewContinuousVariables<1>()(0);
   auto constraint1 = prog.AddRotatedLorentzConeConstraint(
@@ -585,15 +584,36 @@ void TestSocpDualSolution2(const SolverInterface& solver,
     MathematicalProgramResult result;
     solver.Solve(prog, {}, solver_options, &result);
     ASSERT_TRUE(result.is_success());
-    const Eigen::Vector3d constraint1_dual =
-        rotated_lorentz_cone_with_coefficient_two
-            ? Eigen::Vector3d(0.25, 0.5, 0.5)
-            : Eigen::Vector3d(0.5, 0.5, 0.5);
+    const Eigen::Vector3d constraint1_dual = Eigen::Vector3d(0.125, 0.5, 0.5);
     EXPECT_TRUE(CompareMatrices(result.GetDualSolution(constraint1),
                                 constraint1_dual, tol));
     // This Lorentz cone is not activated, hence its dual should be zero.
     EXPECT_TRUE(CompareMatrices(result.GetDualSolution(constraint2),
                                 Eigen::Vector2d(0, 0), tol));
+  }
+}
+
+void TestSocpDuplicatedVariable1(
+    const SolverInterface& solver,
+    const std::optional<SolverOptions>& solver_options, double tol) {
+  MathematicalProgram prog;
+  const auto x = prog.NewContinuousVariables<2>();
+  // Add the constraint that
+  // (1, x0, sqrt(3)*x1, -sqrt(3)*x0) is in the Lorentz cone.
+  Eigen::Matrix<double, 4, 3> A;
+  A.setZero();
+  A(1, 0) = 1;
+  A(2, 1) = std::sqrt(3);
+  A(3, 2) = -std::sqrt(3);
+  prog.AddLorentzConeConstraint(A, Eigen::Vector4d(1, 0, 0, 0),
+                                Vector3<symbolic::Variable>(x(0), x(1), x(0)));
+  prog.AddLinearCost(x(0) + x(1));
+  if (solver.available()) {
+    MathematicalProgramResult result;
+    solver.Solve(prog, std::nullopt, solver_options, &result);
+    EXPECT_TRUE(result.is_success());
+    const Eigen::Vector2d x_sol = result.GetSolution(x);
+    EXPECT_NEAR(4 * x_sol(0) * x_sol(0) + 3 * x_sol(1) * x_sol(1), 1, tol);
   }
 }
 }  // namespace test

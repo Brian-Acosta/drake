@@ -8,7 +8,6 @@
 
 #include "drake/common/default_scalars.h"
 #include "drake/common/extract_double.h"
-#include "drake/common/symbolic.h"
 #include "drake/common/text_logging.h"
 
 using drake::symbolic::Expression;
@@ -24,7 +23,7 @@ template <typename T>
 BsplineTrajectory<T>::BsplineTrajectory(BsplineBasis<T> basis,
                                         std::vector<MatrixX<T>> control_points)
     : basis_(std::move(basis)), control_points_(std::move(control_points)) {
-  DRAKE_DEMAND(CheckInvariants());
+  CheckInvariants();
 }
 
 template <typename T>
@@ -34,10 +33,9 @@ std::unique_ptr<Trajectory<T>> BsplineTrajectory<T>::Clone() const {
 
 template <typename T>
 MatrixX<T> BsplineTrajectory<T>::value(const T& time) const {
-  using std::max;
-  using std::min;
+  using std::clamp;
   return basis().EvaluateCurve(control_points(),
-                               min(max(time, start_time()), end_time()));
+                               clamp(time, start_time(), end_time()));
 }
 
 template <typename T>
@@ -48,12 +46,14 @@ bool BsplineTrajectory<T>::do_has_derivative() const {
 
 template <typename T>
 MatrixX<T> BsplineTrajectory<T>::DoEvalDerivative(
-        const T& t, int derivative_order) const {
+        const T& time, int derivative_order) const {
   if (derivative_order == 0) {
-    return this->value(t);
+    return this->value(time);
   } else if (derivative_order >= basis_.order()) {
     return MatrixX<T>::Zero(rows(), cols());
   } else if (derivative_order >= 1) {
+    using std::clamp;
+    T clamped_time = clamp(time, start_time(), end_time());
     // For a bspline trajectory of order n, the evaluation of k th derivative
     // should take O(k^2) time by leveraging the sparsity of basis value.
     // This differs from DoMakeDerivative, which takes O(nk) time.
@@ -62,7 +62,8 @@ MatrixX<T> BsplineTrajectory<T>::DoEvalDerivative(
     BsplineBasis<T> lower_order_basis = BsplineBasis<T>(
         basis_.order() - derivative_order, derivative_knots);
     std::vector<MatrixX<T>> coefficients(control_points());
-    std::vector<int> base_indices = basis_.ComputeActiveBasisFunctionIndices(t);
+    std::vector<int> base_indices =
+        basis_.ComputeActiveBasisFunctionIndices(clamped_time);
     for (int j = 1; j <= derivative_order; ++j) {
       for (int i = base_indices.front(); i <= base_indices.back() - j; ++i) {
         coefficients.at(i) =
@@ -74,10 +75,12 @@ MatrixX<T> BsplineTrajectory<T>::DoEvalDerivative(
     std::vector<MatrixX<T>> derivative_control_points(
         num_control_points() - derivative_order,
         MatrixX<T>::Zero(rows(), cols()));
-    for (int i : lower_order_basis.ComputeActiveBasisFunctionIndices(t)) {
+    for (int i :
+         lower_order_basis.ComputeActiveBasisFunctionIndices(clamped_time)) {
       derivative_control_points.at(i) = coefficients.at(i);
     }
-    return lower_order_basis.EvaluateCurve(derivative_control_points, t);
+    return lower_order_basis.EvaluateCurve(derivative_control_points,
+                                           clamped_time);
   } else {
     throw std::invalid_argument(
         fmt::format("Invalid derivative order ({}). The derivative order must "
@@ -236,9 +239,9 @@ boolean<T> BsplineTrajectory<T>::operator==(
 }
 
 template <typename T>
-bool BsplineTrajectory<T>::CheckInvariants() const {
-  return static_cast<int>(control_points_.size()) ==
-      basis_.num_basis_functions();
+void BsplineTrajectory<T>::CheckInvariants() const {
+  DRAKE_THROW_UNLESS(static_cast<int>(control_points_.size()) ==
+                     basis_.num_basis_functions());
 }
 
 DRAKE_DEFINE_CLASS_TEMPLATE_INSTANTIATIONS_ON_DEFAULT_SCALARS(

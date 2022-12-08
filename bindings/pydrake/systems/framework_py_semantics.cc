@@ -142,14 +142,16 @@ void DoScalarIndependentDefinitions(py::module m) {
       .value("kCrossesZero", WitnessFunctionDirection::kCrossesZero,
           doc.WitnessFunctionDirection.kCrossesZero.doc);
 
-  auto event_data = py::class_<EventData>(m, "EventData", doc.EventData.doc);
-  DefClone(&event_data);
-  py::class_<PeriodicEventData, EventData>(
-      m, "PeriodicEventData", doc.PeriodicEventData.doc)
-      .def("period_sec", &PeriodicEventData::period_sec,
-          doc.PeriodicEventData.period_sec.doc)
-      .def("offset_sec", &PeriodicEventData::offset_sec,
-          doc.PeriodicEventData.offset_sec.doc);
+  {
+    py::class_<PeriodicEventData> cls(
+        m, "PeriodicEventData", doc.PeriodicEventData.doc);
+    DefCopyAndDeepCopy(&cls);
+    cls  // BR
+        .def("period_sec", &PeriodicEventData::period_sec,
+            doc.PeriodicEventData.period_sec.doc)
+        .def("offset_sec", &PeriodicEventData::offset_sec,
+            doc.PeriodicEventData.offset_sec.doc);
+  }
 
   {
     using Class = EventStatus;
@@ -218,6 +220,14 @@ void DoScalarIndependentDefinitions(py::module m) {
     constexpr auto& cls_doc = doc.CacheEntryValue;
     py::class_<Class>(m, "CacheEntryValue", cls_doc.doc)
         .def(
+            "GetValueOrThrow",
+            [](const Class& self) {
+              py::object value = py::cast<const AbstractValue*>(
+                  &self.GetAbstractValueOrThrow());
+              return value.attr("get_value")();
+            },
+            py_rvp::reference_internal, cls_doc.GetValueOrThrow.doc)
+        .def(
             "GetMutableValueOrThrow",
             [](Class* self) {
               py::object value = py::cast<AbstractValue*>(
@@ -232,6 +242,24 @@ void DoScalarIndependentDefinitions(py::module m) {
     constexpr auto& cls_doc = doc.CacheEntry;
     py::class_<Class>(m, "CacheEntry", cls_doc.doc)
         .def("prerequisites", &Class::prerequisites, cls_doc.prerequisites.doc)
+        .def("EvalAbstract", &Class::EvalAbstract, py::arg("context"),
+            py_rvp::reference_internal, cls_doc.EvalAbstract.doc)
+        .def(
+            "Eval",
+            [](const Class& self, const ContextBase& context) {
+              const auto& abstract = self.EvalAbstract(context);
+              // See above comments in `DoEval`.
+              py::object context_ref = py::cast(&context);
+              py::object abstract_value_ref =
+                  py::cast(&abstract, py_rvp::reference_internal, context_ref);
+              return abstract_value_ref.attr("get_value")();
+            },
+            py::arg("context"), cls_doc.Eval.doc)
+        .def("get_cache_entry_value", &Class::get_cache_entry_value,
+            py::arg("context"),
+            // Keep alive, ownership: `return` keeps `context` alive.
+            py::keep_alive<0, 2>(), py_rvp::reference,
+            cls_doc.get_cache_entry_value.doc)
         .def("get_mutable_cache_entry_value",
             &Class::get_mutable_cache_entry_value, py::arg("context"),
             // Keep alive, ownership: `return` keeps `context` alive.
@@ -323,13 +351,17 @@ void DoScalarDependentDefinitions(py::module m) {
       .def("SetDiscreteState",
           overload_cast_explicit<void, const Eigen::Ref<const VectorX<T>>&>(
               &Context<T>::SetDiscreteState),
-          py::arg("xd"), doc.Context.SetDiscreteState.doc_1args)
+          py::arg("xd"), doc.Context.SetDiscreteState.doc_single_group)
       .def("SetDiscreteState",
           overload_cast_explicit<void, int,
               const Eigen::Ref<const VectorX<T>>&>(
               &Context<T>::SetDiscreteState),
           py::arg("group_index"), py::arg("xd"),
-          doc.Context.SetDiscreteState.doc_2args)
+          doc.Context.SetDiscreteState.doc_select_one_group)
+      .def("SetDiscreteState",
+          overload_cast_explicit<void, const DiscreteValues<T>&>(
+              &Context<T>::SetDiscreteState),
+          py::arg("xd"), doc.Context.SetDiscreteState.doc_set_everything)
       .def(
           "SetAbstractState",
           [](py::object self, int index, py::object value) {
@@ -409,12 +441,20 @@ void DoScalarDependentDefinitions(py::module m) {
   auto bind_context_methods_templated_on_a_secondary_scalar =
       [m, &doc, &context_cls](auto dummy_u) {
         using U = decltype(dummy_u);
-        context_cls.def(
-            "SetTimeStateAndParametersFrom",
-            [](Context<T>* self, const Context<U>& source) {
-              self->SetTimeStateAndParametersFrom(source);
-            },
-            py::arg("source"), doc.Context.SetTimeStateAndParametersFrom.doc);
+        context_cls  // BR
+            .def(
+                "SetStateAndParametersFrom",
+                [](Context<T>* self, const Context<U>& source) {
+                  self->SetStateAndParametersFrom(source);
+                },
+                py::arg("source"), doc.Context.SetStateAndParametersFrom.doc)
+            .def(
+                "SetTimeStateAndParametersFrom",
+                [](Context<T>* self, const Context<U>& source) {
+                  self->SetTimeStateAndParametersFrom(source);
+                },
+                py::arg("source"),
+                doc.Context.SetTimeStateAndParametersFrom.doc);
       };
   type_visit(
       bind_context_methods_templated_on_a_secondary_scalar, CommonScalarPack{});
@@ -537,6 +577,13 @@ void DoScalarDependentDefinitions(py::module m) {
             return out;
           },
           doc.DiagramBuilder.GetMutableSystems.doc)
+      .def("GetSubsystemByName", &DiagramBuilder<T>::GetSubsystemByName,
+          py::arg("name"), py_rvp::reference_internal,
+          doc.DiagramBuilder.GetSubsystemByName.doc)
+      .def("GetMutableSubsystemByName",
+          &DiagramBuilder<T>::GetMutableSubsystemByName, py::arg("name"),
+          py_rvp::reference_internal,
+          doc.DiagramBuilder.GetMutableSubsystemByName.doc)
       .def(
           "connection_map",
           [](DiagramBuilder<T>* self) {
@@ -832,6 +879,13 @@ void DoScalarDependentDefinitions(py::module m) {
           static_cast<const AbstractValues& (State<T>::*)() const>(
               &State<T>::get_abstract_state),
           py_rvp::reference_internal, doc.State.get_abstract_state.doc)
+      .def(
+          "get_abstract_state",
+          [](State<T>* self, int index) -> const AbstractValue& {
+            return self->get_abstract_state().get_value(index);
+          },
+          py::arg("index"), py_rvp::reference_internal,
+          doc.State.get_abstract_state.doc)
       .def(
           "get_mutable_abstract_state",
           [](State<T>* self) -> AbstractValues& {

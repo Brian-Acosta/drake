@@ -10,18 +10,18 @@ exports_files(
 )
 
 drake_cc_binary(
-    name = "ign_sdf",
-    srcs = ["ign_sdf_main.cc"],
+    name = "gz_sdf",
+    srcs = ["gz_sdf_main.cc"],
     deps = [
         "//common:essential",
         "@gflags",
-        "@sdformat_internal//:ign_sdf_cmdline",
+        "@sdformat_internal//:ign_cmdline",
     ],
 )
 
 drake_py_unittest(
-    name = "ign_sdf_test",
-    data = [":ign_sdf"],
+    name = "gz_sdf_test",
+    data = [":gz_sdf"],
 )
 
-add_lint_tests()
+add_lint_tests(python_lint_extra_srcs = ["embed_sdf.py"])

@@ -11,8 +11,8 @@ def lcm_repository(
         # When upgrading this commit, check if the LCM maintainers have tagged
         # a new version number; if so, then update the version numbers within
         # the two lcm-*.cmake files in this directory to match.
-        commit = "91ce7a2ae46ad05f8a232f5fe32a06cccbead1c2",
-        sha256 = "8ea0076d2f2158fc750fec697b68c6903a9d70ccbe4e3f24240415a13445381f",  # noqa
-        build_file = "@drake//tools/workspace/lcm:package.BUILD.bazel",
+        commit = "0289aa9efdf043dd69d65b7d01273e8108dd79f7",
+        sha256 = "45a2b8376ee1de4e3150b2b1afc7ad721bff5bac4ddfe19e1916b50060fd8ee5",  # noqa
+        build_file = ":package.BUILD.bazel",
         mirrors = mirrors,
     )

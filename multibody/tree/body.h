@@ -6,6 +6,7 @@
 
 #include "drake/common/default_scalars.h"
 #include "drake/common/drake_copyable.h"
+#include "drake/common/drake_deprecated.h"
 #include "drake/common/unused.h"
 #include "drake/multibody/tree/frame.h"
 #include "drake/multibody/tree/multibody_element.h"
@@ -184,15 +185,7 @@ class Body : public MultibodyElement<Body, T, BodyIndex> {
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(Body)
 
-  /// Creates a %Body named `name` in model instance `model_instance`
-  /// with a given `default_mass` and a BodyFrame associated with it.
-  Body(const std::string& name, ModelInstanceIndex model_instance,
-       double default_mass)
-      : MultibodyElement<Body, T, BodyIndex>(model_instance),
-        name_(name),
-        body_frame_(*this), default_mass_(default_mass) {}
-
-  /// Gets the `name` associated with `this` body.
+  /// Gets the `name` associated with `this` body. The name will never be empty.
   const std::string& name() const { return name_; }
 
   /// Returns the number of generalized positions q describing flexible
@@ -208,7 +201,7 @@ class Body : public MultibodyElement<Body, T, BodyIndex> {
     return body_frame_;
   }
 
-  /// For a floating body, lock its implicit inboard joint. Its generalized
+  /// For a floating body, lock its inboard joint. Its generalized
   /// velocities will be 0 until it is unlocked. Locking is not yet supported
   /// for continuous-mode systems.
   /// @throws std::exception if this body is not a floating body, or if the
@@ -221,22 +214,14 @@ class Body : public MultibodyElement<Body, T, BodyIndex> {
     // non-floating bodies.
     if (!is_floating()) {
       throw std::logic_error(fmt::format(
-          "Attempted to call lock() on non-floating body {}", name()));
+          "Attempted to call unlock() on non-floating body {}", name()));
     }
-    context->get_mutable_abstract_parameter(is_locked_parameter_index_)
-        .set_value(true);
-
-    static constexpr int kVelocities = 6;
-    const auto& tree = this->get_parent_tree();
-    const int start_in_v =
-        this->floating_velocities_start() - tree.num_positions();
-    DRAKE_ASSERT(start_in_v >= 0);
-    DRAKE_ASSERT(start_in_v + kVelocities <= tree.num_velocities());
-    tree.GetMutableVelocities(context)
-        .template segment<kVelocities>(start_in_v).setZero();
+    this->get_parent_tree()
+        .get_mobilizer(topology_.inboard_mobilizer)
+        .Lock(context);
   }
 
-  /// For a floating body, unlock its implicit inboard joint. Unlocking is not
+  /// For a floating body, unlock its inboard joint. Unlocking is not
   /// yet supported for continuous-mode systems.
   /// @throws std::exception if this body is not a floating body, or if the
   /// parent model uses continuous state.
@@ -250,14 +235,16 @@ class Body : public MultibodyElement<Body, T, BodyIndex> {
       throw std::logic_error(fmt::format(
           "Attempted to call unlock() on non-floating body {}", name()));
     }
-    context->get_mutable_abstract_parameter(is_locked_parameter_index_)
-        .set_value(false);
+    this->get_parent_tree()
+        .get_mobilizer(topology_.inboard_mobilizer)
+        .Unlock(context);
   }
 
   /// @return true if the body is locked, false otherwise.
   bool is_locked(const systems::Context<T>& context) const {
-    return context.get_parameters().template get_abstract_parameter<bool>(
-        is_locked_parameter_index_);
+    return this->get_parent_tree()
+        .get_mobilizer(topology_.inboard_mobilizer)
+        .is_locked(context);
   }
 
   /// (Advanced) Returns the index of the node in the underlying tree structure
@@ -266,7 +253,8 @@ class Body : public MultibodyElement<Body, T, BodyIndex> {
     return topology_.body_node;
   }
 
-  /// (Advanced) Returns `true` if `this` body is granted 6-dofs by a Mobilizer.
+  /// (Advanced) Returns `true` if `this` body is granted 6-dofs by a Mobilizer
+  /// and the parent body of this body's associated 6-dof joint is `world`.
   /// @note A floating body is not necessarily modeled with a quaternion
   /// mobilizer, see has_quaternion_dofs(). Alternative options include a space
   /// XYZ parametrization of rotations, see SpaceXYZMobilizer.
@@ -347,11 +335,11 @@ class Body : public MultibodyElement<Body, T, BodyIndex> {
   }
 
   /// Returns the default mass (not Context dependent) for `this` body.
-  /// In general, the mass for a body can be a parameter of the model that can
-  /// be retrieved with the method get_mass(). When the mass of a body is a
-  /// parameter, the value returned by get_default_mass() is used to initialize
-  /// the mass parameter in the context.
-  double get_default_mass() const { return default_mass_; }
+  /// In general, a body's mass can be a Context-dependent parameter that is
+  /// returned by the method get_mass(). When a body's mass is a parameter, the
+  /// value returned by default_mass() is used to initialize the mass parameter
+  /// in the Context.
+  virtual double default_mass() const = 0;
 
   /// Returns the default rotational inertia (not Context dependent) for `this`
   /// body B's about Bo (B's origin), expressed in B (this body's frame).
@@ -360,7 +348,7 @@ class Body : public MultibodyElement<Body, T, BodyIndex> {
 
   /// (Advanced) Returns the mass of this body stored in `context`.
   virtual const T& get_mass(
-      const systems::Context<T> &context) const = 0;
+      const systems::Context<T>& context) const = 0;
 
   /// (Advanced) Computes the center of mass `p_BoBcm_B` (or `p_Bcm` for short)
   /// of this body measured from this body's frame origin `Bo` and expressed in
@@ -478,6 +466,13 @@ class Body : public MultibodyElement<Body, T, BodyIndex> {
   }
 
  protected:
+  /// Creates a %Body named `name` in model instance `model_instance`.
+  /// The `name` must not be empty.
+  Body(const std::string& name, ModelInstanceIndex model_instance)
+      : MultibodyElement<Body, T, BodyIndex>(model_instance),
+        name_(internal::DeprecateWhenEmptyName(name, "Body")),
+        body_frame_(*this) {}
+
   /// @name Methods to make a clone templated on different scalar types.
   ///
   /// These methods are meant to be called by MultibodyTree::CloneToScalar()
@@ -506,16 +501,6 @@ class Body : public MultibodyElement<Body, T, BodyIndex> {
       const internal::MultibodyTree<symbolic::Expression>&) const = 0;
 
   /// @}
-
-  // Implementation for MultibodyElement::DoDeclareParameters().
-  void DoDeclareParameters(
-      internal::MultibodyTreeSystem<T>* tree_system) override {
-    // Declare parent classes' parameters
-    MultibodyElement<Body, T, BodyIndex>::DoDeclareParameters(tree_system);
-
-    is_locked_parameter_index_ =
-        this->DeclareAbstractParameter(tree_system, Value<bool>(false));
-  }
 
  private:
   // Only friends of BodyAttorney (i.e. MultibodyTree) have access to a selected
@@ -551,22 +536,13 @@ class Body : public MultibodyElement<Body, T, BodyIndex> {
   // A string identifying the body in its model.
   // Within a MultibodyPlant model this string is guaranteed to be unique by
   // MultibodyPlant's API.
-  std::string name_;
+  const std::string name_;
 
   // Body frame associated with this body.
   BodyFrame<T> body_frame_;
 
-  // In general, the mass of a body can be a constant property of the body or a
-  // Parameter of the model. The default mass value is directly reported by
-  // get_default_mass() in the former case and used to initialize the mass
-  // Parameter in the Context in the latter case.
-  double default_mass_{0.0};
-
   // The internal bookkeeping topology struct used by MultibodyTree.
   internal::BodyTopology topology_;
-
-  // System parameter index for `this` body's lock state stored in a context.
-  systems::AbstractParameterIndex is_locked_parameter_index_;
 };
 
 /// @cond

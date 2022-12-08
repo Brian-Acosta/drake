@@ -17,6 +17,7 @@ drake_cc_package_library(
     visibility = ["//visibility:public"],
     deps = [
         ":articulated_body_inertia",
+        ":geometry_spatial_inertia",
         ":multibody_element",
         ":multibody_tree_caches",
         ":multibody_tree_core",
@@ -101,9 +102,11 @@ drake_cc_library(
     srcs = [
         "ball_rpy_joint.cc",
         "body.cc",
+        "body_node.cc",
         "body_node_impl.cc",
         "door_hinge.cc",
         "fixed_offset_frame.cc",
+        "frame.cc",
         "joint.cc",
         "joint_actuator.cc",
         "linear_bushing_roll_pitch_yaw.cc",
@@ -117,6 +120,8 @@ drake_cc_library(
         "planar_mobilizer.cc",
         "prismatic_joint.cc",
         "prismatic_mobilizer.cc",
+        "prismatic_spring.cc",
+        "quaternion_floating_joint.cc",
         "quaternion_floating_mobilizer.cc",
         "revolute_joint.cc",
         "revolute_mobilizer.cc",
@@ -159,6 +164,8 @@ drake_cc_library(
         "planar_mobilizer.h",
         "prismatic_joint.h",
         "prismatic_mobilizer.h",
+        "prismatic_spring.h",
+        "quaternion_floating_joint.h",
         "quaternion_floating_mobilizer.h",
         "revolute_joint.h",
         "revolute_mobilizer.h",
@@ -183,9 +190,9 @@ drake_cc_library(
         ":multibody_tree_indexes",
         ":spatial_inertia",
         ":string_view_map_key",
-        "//common:autodiff",
+        "//common:default_scalars",
+        "//common:name_value",
         "//common:nice_type_name",
-        "//common:symbolic",
         "//common:unused",
         "//math:geometric_transform",
         "//systems/framework:leaf_system",
@@ -242,10 +249,21 @@ drake_cc_library(
         "//common:default_scalars",
         "//common:essential",
         "//common:nice_type_name",
-        "//common:symbolic",
         "//math:linear_solve",
         "//math:vector3_util",
         "//multibody/math:spatial_algebra",
+    ],
+)
+
+drake_cc_library(
+    name = "geometry_spatial_inertia",
+    srcs = ["geometry_spatial_inertia.cc"],
+    hdrs = ["geometry_spatial_inertia.h"],
+    deps = [
+        ":spatial_inertia",
+        "//geometry:shape_specification",
+        "//geometry/proximity:obj_to_surface_mesh",
+        "//geometry/proximity:triangle_surface_mesh",
     ],
 )
 
@@ -260,6 +278,15 @@ drake_cc_library(
         ":tree",
         "//common:default_scalars",
         "//systems/framework",
+    ],
+)
+
+drake_cc_googletest(
+    name = "body_node_test",
+    deps = [
+        ":multibody_tree_core",
+        ":rotational_inertia",
+        "//common/test_utilities:expect_throws_message",
     ],
 )
 
@@ -424,6 +451,7 @@ drake_cc_googletest(
         ":mobilizer_tester",
         ":tree",
         "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:expect_throws_message",
         "//math:geometric_transform",
     ],
 )
@@ -486,6 +514,9 @@ drake_cc_googletest(
     name = "rigid_body_test",
     deps = [
         ":tree",
+        "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:expect_throws_message",
+        "//systems/framework:context",
     ],
 )
 
@@ -537,6 +568,15 @@ drake_cc_googletest(
         "//multibody/plant",
         "//systems/analysis:initial_value_problem",
         "//systems/analysis:simulator",
+    ],
+)
+
+drake_cc_googletest(
+    name = "prismatic_spring_test",
+    deps = [
+        ":tree",
+        "//common/test_utilities:eigen_matrix_compare",
+        "//systems/framework:context",
     ],
 )
 
@@ -602,10 +642,32 @@ drake_cc_googletest(
 )
 
 drake_cc_googletest(
+    name = "quaternion_floating_joint_test",
+    deps = [
+        ":tree",
+        "//common/test_utilities:expect_no_throw",
+    ],
+)
+
+drake_cc_googletest(
     name = "joint_actuator_test",
     deps = [
         ":tree",
         "//common/test_utilities",
+    ],
+)
+
+drake_cc_googletest(
+    name = "geometry_spatial_inertia_test",
+    data = ["//multibody/parsing:test_models"],
+    deps = [
+        ":geometry_spatial_inertia",
+        "//common:find_resource",
+        "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:expect_throws_message",
+        "//geometry:shape_specification",
+        "//geometry/proximity:make_box_mesh",
+        "//geometry/proximity:triangle_surface_mesh",
     ],
 )
 

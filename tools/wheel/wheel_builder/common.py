@@ -6,6 +6,18 @@ import os
 import re
 import sys
 
+# Location where most of the build will take place.
+build_root = '/opt/drake-wheel-build'
+
+# Location where testing of the wheel will take place.
+test_root = '/opt/drake-wheel-test'
+
+# Location where the wheel will be produced.
+wheelhouse = os.path.join(build_root, 'wheel', 'wheelhouse')
+
+# Location of various scripts and other artifacts used to complete the build.
+resource_root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+
 
 def gripe(message):
     """
@@ -22,6 +34,15 @@ def die(message, result=1):
     sys.exit(result)
 
 
+def wheel_name(python_version, wheel_version, wheel_platform):
+    """
+    Determines the complete name of the Drake wheel, given various individual
+    bits such as the Drake version, Python version, and Python wheel platform.
+    """
+    vm = f'cp{python_version}'
+    return f'drake-{wheel_version}-{vm}-{vm}-{wheel_platform}.whl'
+
+
 def _check_version(version):
     """
     Returns True iff the given version string matches PEP 440.
@@ -34,6 +55,28 @@ def _check_version(version):
         version) is not None
 
 
+def find_tests(*test_subdirs):
+    """
+    Returns a list of tests in the common directory and any subdirectories
+    given as additional arguments.
+    """
+    all_tests = []
+    for test_dir in ('', *test_subdirs):
+        tests = []
+
+        test_dir_full = os.path.join(resource_root, 'test', 'tests', test_dir)
+        for test in os.listdir(test_dir_full):
+            if not os.path.isdir(os.path.join(test_dir_full, test)):
+                tests.append(os.path.join('tests', test_dir, test))
+
+        where = f'subdirectory {test_dir!r}' if len(test_dir) else 'directory'
+        assert len(tests), f'No tests were found in the test {where}!'
+
+        all_tests += sorted(tests)
+
+    return all_tests
+
+
 def do_main(args, platform):
     """
     Entry point; performs the build using the given CLI arguments, platform,
@@ -43,8 +86,12 @@ def do_main(args, platform):
     platform-specific implementations of various operations necessary to
     complete the build.
     """
-    module_dir = os.path.dirname(os.path.realpath(__file__))
-    platform.resource_root = os.path.dirname(module_dir)
+
+    # Work around `bazel run` changing the working directory; this is to allow
+    # the user to pass in relative paths in a sane manner.
+    real_cwd = os.environ.get('BUILD_WORKING_DIRECTORY')
+    if real_cwd is not None:
+        os.chdir(real_cwd)
 
     # Set up argument parser.
     parser = argparse.ArgumentParser(
@@ -57,7 +104,7 @@ def do_main(args, platform):
 
     parser.add_argument(
         '-o', '--output-dir', metavar='DIR', default=os.path.realpath('.'),
-        help='directory into which to extract wheels (default: .)')
+        help='directory into which to extract wheels (default: %(default)r)')
     parser.add_argument(
         '-n', '--no-extract', dest='extract', action='store_false',
         help='build images but do not extract wheels')

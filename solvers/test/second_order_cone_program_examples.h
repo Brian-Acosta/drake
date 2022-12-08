@@ -338,14 +338,16 @@ class MinimalDistanceFromSphereProblem {
 void TestSocpDualSolution1(const SolverInterface& solver,
                            const SolverOptions& solver_options, double tol);
 
-// @param rotated_lorentz_cone_with_coefficient_two. Set this to true if this
-// solver has a coefficient 2 on the rotated Lorentz cone constraint as 2*x₁x₂
-// >= x₃² + ... + xₙ² (like in Mosek). Set this to false if this solver doesn't
-// have a coefficient 2 on the rotated Lorentz cone constraint, as x₁x₂
-// >= x₃² + ... + xₙ²
 void TestSocpDualSolution2(const SolverInterface& solver,
-                           const SolverOptions& solver_options, double tol,
-                           bool rotated_lorentz_cone_with_coefficient_two);
+                           const SolverOptions& solver_options, double tol);
+
+// We intentionally use duplicated variables in the second order cone constraint
+// to test if Drake's solver wrappers can handle duplicated variables.
+// min x0 + x1
+// s.t 4x0²+3x1² ≤ 1
+void TestSocpDuplicatedVariable1(
+    const SolverInterface& solver,
+    const std::optional<SolverOptions>& solver_options, double tol);
 }  // namespace test
 }  // namespace solvers
 }  // namespace drake

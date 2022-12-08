@@ -20,6 +20,7 @@ drake_cc_package_library(
         ":manipulator_equation_constraint",
         ":quaternion_integration_constraint",
         ":sliding_friction_complementarity_constraint",
+        ":spatial_velocity_constraint",
         ":static_equilibrium_constraint",
         ":static_equilibrium_problem",
         ":static_friction_cone_complementarity_constraint",
@@ -33,7 +34,7 @@ drake_cc_library(
     srcs = ["centroidal_momentum_constraint.cc"],
     hdrs = ["centroidal_momentum_constraint.h"],
     deps = [
-        "//multibody/inverse_kinematics:kinematic_constraint",
+        "//multibody/inverse_kinematics:kinematic_evaluators",
         "//multibody/plant",
         "//solvers:constraint",
     ],
@@ -54,7 +55,7 @@ drake_cc_library(
     hdrs = ["contact_wrench_evaluator.h"],
     deps = [
         "//common:sorted_pair",
-        "//multibody/inverse_kinematics:kinematic_constraint",
+        "//multibody/inverse_kinematics:kinematic_evaluators",
         "//multibody/plant",
         "//solvers:evaluator_base",
     ],
@@ -83,7 +84,7 @@ drake_cc_library(
     deps = [
         ":contact_wrench_evaluator",
         "//geometry:scene_graph",
-        "//multibody/inverse_kinematics:kinematic_constraint",
+        "//multibody/inverse_kinematics:kinematic_evaluators",
         "//multibody/plant",
         "//solvers:binding",
         "//solvers:constraint",
@@ -97,7 +98,7 @@ drake_cc_library(
     deps = [
         ":contact_wrench_evaluator",
         "//geometry:scene_graph",
-        "//multibody/inverse_kinematics:kinematic_constraint",
+        "//multibody/inverse_kinematics:kinematic_evaluators",
         "//multibody/plant",
         "//solvers:binding",
         "//solvers:constraint",
@@ -172,10 +173,22 @@ drake_cc_library(
 )
 
 drake_cc_library(
+    name = "spatial_velocity_constraint",
+    srcs = ["spatial_velocity_constraint.cc"],
+    hdrs = ["spatial_velocity_constraint.h"],
+    deps = [
+        "//multibody/inverse_kinematics:kinematic_evaluators",
+        "//multibody/plant",
+        "//solvers:constraint",
+    ],
+)
+
+drake_cc_library(
     name = "toppra",
     srcs = ["toppra.cc"],
     hdrs = ["toppra.h"],
     deps = [
+        "//common:name_value",
         "//common/trajectories",
         "//multibody/plant",
         "//solvers:choose_best_solver",
@@ -271,9 +284,18 @@ drake_cc_googletest(
     deps = [
         ":quaternion_integration_constraint",
         "//common/test_utilities:eigen_matrix_compare",
-        "//multibody/inverse_kinematics:kinematic_constraint",
+        "//multibody/inverse_kinematics:kinematic_evaluators",
         "//solvers:mathematical_program",
         "//solvers:solve",
+    ],
+)
+
+drake_cc_googletest(
+    name = "spatial_velocity_constraint_test",
+    deps = [
+        ":spatial_velocity_constraint",
+        "//common/test_utilities:expect_throws_message",
+        "//multibody/inverse_kinematics:inverse_kinematics_test_utilities",
     ],
 )
 

@@ -6,6 +6,7 @@
 
 #include "drake/common/find_resource.h"
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
+#include "drake/common/test_utilities/limit_malloc.h"
 #include "drake/multibody/parsing/parser.h"
 #include "drake/multibody/plant/multibody_plant.h"
 #include "drake/multibody/tree/prismatic_joint.h"
@@ -16,6 +17,7 @@ namespace drake {
 
 using multibody::Parser;
 using systems::Context;
+using test::LimitMalloc;
 
 namespace multibody {
 namespace {
@@ -30,7 +32,7 @@ class MultibodyPlantMassMatrixTests : public ::testing::Test {
   void LoadModel(const std::string& file_path) {
     const std::string model_path = FindResourceOrThrow(file_path);
     Parser parser(&plant_);
-    parser.AddModelFromFile(model_path);
+    parser.AddModels(model_path);
     plant_.Finalize();
   }
 
@@ -44,11 +46,11 @@ class MultibodyPlantMassMatrixTests : public ::testing::Test {
 
     Parser parser(&plant_);
     const ModelInstanceIndex arm_model =
-        parser.AddModelFromFile(FindResourceOrThrow(kArmSdfPath));
+        parser.AddModels(FindResourceOrThrow(kArmSdfPath)).at(0);
 
     // Add the gripper.
     const ModelInstanceIndex gripper_model =
-        parser.AddModelFromFile(FindResourceOrThrow(kWsg50SdfPath));
+        parser.AddModels(FindResourceOrThrow(kWsg50SdfPath)).at(0);
 
     const auto& base_body = plant_.GetBodyByName("iiwa_link_0", arm_model);
     const auto& end_effector = plant_.GetBodyByName("iiwa_link_7", arm_model);
@@ -64,7 +66,11 @@ class MultibodyPlantMassMatrixTests : public ::testing::Test {
   void VerifyMassMatrixComputation(const Context<double>& context) {
     // Compute mass matrix via the Composite Body Algorithm.
     MatrixX<double> Mcba(plant_.num_velocities(), plant_.num_velocities());
-    plant_.CalcMassMatrix(context, &Mcba);
+    {
+      // CalcMassMatrix on `double` should never allocate.
+      LimitMalloc guard;
+      plant_.CalcMassMatrix(context, &Mcba);
+    }
 
     // Compute mass matrix using inverse dynamics for each column.
     MatrixX<double> Mid(plant_.num_velocities(), plant_.num_velocities());
@@ -109,8 +115,9 @@ TEST_F(MultibodyPlantMassMatrixTests, AtlasRobot) {
   for (JointIndex joint_index(0); joint_index < plant_.num_joints();
        ++joint_index) {
     const Joint<double>& joint = plant_.get_joint(joint_index);
-    // This model only has weld and revolute joints. Weld joints have zero DOFs.
-    if (joint.num_velocities() != 0) {
+    // This model has weld, revolute, and floating joints. Set the revolute
+    // joints to an arbitrary angle.
+    if (joint.type_name() == RevoluteJoint<double>::kTypeName) {
       const RevoluteJoint<double>& revolute_joint =
           dynamic_cast<const RevoluteJoint<double>&>(joint);
       // Arbitrary non-zero angle.
@@ -134,8 +141,9 @@ TEST_F(MultibodyPlantMassMatrixTests, AtlasRobotWithFixedJoints) {
   for (JointIndex joint_index(0); joint_index < plant_.num_joints();
        ++joint_index) {
     const Joint<double>& joint = plant_.get_joint(joint_index);
-    // This model only has weld and revolute joints. Weld joints have zero DOFs.
-    if (joint.num_velocities() != 0) {
+    // This model has weld, revolute, and floating joints. Set the revolute
+    // joints to an arbitrary angle.
+    if (joint.type_name() == RevoluteJoint<double>::kTypeName) {
       const RevoluteJoint<double>& revolute_joint =
           dynamic_cast<const RevoluteJoint<double>&>(joint);
       // Arbitrary non-zero angle.
@@ -156,12 +164,12 @@ TEST_F(MultibodyPlantMassMatrixTests, IiwaWithWeldedGripper) {
        ++joint_index) {
     const Joint<double>& joint = plant_.get_joint(joint_index);
     // This model only has weld, prismatic, and revolute joints.
-    if (joint.type_name() == "revolute") {
+    if (joint.type_name() == RevoluteJoint<double>::kTypeName) {
       const RevoluteJoint<double>& revolute_joint =
           dynamic_cast<const RevoluteJoint<double>&>(joint);
       // Arbitrary non-zero angle.
       revolute_joint.set_angle(context.get(), 0.5 * joint_index);
-    } else if (joint.type_name() == "prismatic") {
+    } else if (joint.type_name() == PrismaticJoint<double>::kTypeName) {
        const PrismaticJoint<double>& prismatic_joint =
           dynamic_cast<const PrismaticJoint<double>&>(joint);
       // Arbitrary non-zero joint translation.
