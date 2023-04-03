@@ -984,13 +984,13 @@ void SetSolution(
     ScopeExit guard([fixed]() {
       GRBfreemodel(fixed);
     });
-    int error = GRBfixmodel(model, &fixed);
+    int error_fixed = GRBfixmodel(model, &fixed);
     DRAKE_DEMAND(!error);
     GRBenv* fenv = GRBgetenv(fixed);
-    DRAKE_DEMAND(fixed);
-    error = GRBsetintparam(fenv, "PRESOLVE", 0);
+    DRAKE_DEMAND(fixed != nullptr);
+    error_fixed = GRBsetintparam(fenv, "PRESOLVE", 0);
     DRAKE_DEMAND(!error);
-    error = GRBoptimize(fixed);
+    error_fixed = GRBoptimize(fixed);
     DRAKE_DEMAND(!error);
   }
 
