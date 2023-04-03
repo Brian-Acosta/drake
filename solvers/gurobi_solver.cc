@@ -979,6 +979,19 @@ void SetSolution(
                                      constraint_dual_start_row, result);
 
     SetAllSecondOrderConeDualSolution(prog, model, result);
+  } else if (is_mip) {
+    GRBmodel * fixed = nullptr;
+    ScopeExit guard([fixed]() {
+      GRBfreemodel(fixed);
+    });
+    int error = GRBfixmodel(model, &fixed);
+    DRAKE_DEMAND(!error);
+    GRBenv* fenv = GRBgetenv(fixed);
+    DRAKE_DEMAND(fixed);
+    error = GRBsetintparam(fenv, "PRESOLVE", 0);
+    DRAKE_DEMAND(!error);
+    error = GRBoptimize(fixed);
+    DRAKE_DEMAND(!error);
   }
 
   // Obtain optimal cost.

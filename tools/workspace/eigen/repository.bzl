@@ -15,7 +15,7 @@ def eigen_repository(
         modname = "eigen3",
         # Keep this version in sync with drake/common/eigen_types.h.
         atleast_version = "3.3.4",
-        extra_defines = ["EIGEN_MPL2_ONLY"],
+        extra_defines = [],
         pkg_config_paths = [],
         homebrew_subdir = "opt/eigen/share/pkgconfig",
         **kwargs):
