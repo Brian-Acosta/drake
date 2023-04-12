@@ -26,6 +26,7 @@ import unittest
 
 from pydrake.common import FindResourceOrThrow
 from pydrake.common.test_utilities.deprecation import catch_drake_warnings
+from pydrake.geometry import SceneGraph
 from pydrake.multibody.tree import (
     ModelInstanceIndex,
 )
@@ -37,15 +38,15 @@ from pydrake.multibody.plant import (
 class TestParsing(unittest.TestCase):
 
     def test_package_map(self):
-        # Simple coverage test for default constructor
+        # Simple coverage test for constructors.
         dut = PackageMap()
-        self.assertEqual(dut.size(), 1)
+        self.assertEqual(dut.size(), 2)
+        PackageMap(other=dut)
+        copy.copy(dut)
 
         dut = PackageMap.MakeEmpty()
         dut2 = PackageMap.MakeEmpty()
         tmpdir = os.environ.get('TEST_TMPDIR')
-        model = FindResourceOrThrow(
-            "drake/examples/atlas/urdf/atlas_minimal_contact.urdf")
 
         # Simple coverage test for Add, AddMap, Contains, size,
         # GetPackageNames, GetPath, AddPackageXml, Remove.
@@ -64,6 +65,34 @@ class TestParsing(unittest.TestCase):
         # Simple coverage test for folder and environment.
         dut.PopulateFromEnvironment(environment_variable='TEST_TMPDIR')
         dut.PopulateFromFolder(path=tmpdir)
+
+    def test_package_map_remote_params(self):
+        dut = PackageMap.RemoteParams(
+            urls=["file:///tmp/missing.zip"],
+            sha256="0" * 64,
+            archive_type="zip",
+            strip_prefix="prefix",)
+        self.assertIn("missing.zip", dut.ToJson())
+        copy.copy(dut)
+        copy.deepcopy(dut)
+
+    def test_package_map_add_remote(self):
+        """Runs a full lifecycle of AddRemote + GetPath to check that Python
+        bindings calling C++ code that shells out to Python all plays nice.
+        """
+        dut = PackageMap.MakeEmpty()
+        zipfile = FindResourceOrThrow(
+            "drake/multibody/parsing/test/package_map_test_packages/"
+            "compressed.zip")
+        dut.AddRemote(package_name="compressed",
+                      params=PackageMap.RemoteParams(
+                          urls=[f"file://{zipfile}"],
+                          sha256=("b4bdbad313293ca61fe8f4ed1b5579da"
+                                  "dadb3a5c08f0a6d06a8e39e5f97f1bd1"),
+                          strip_prefix="compressed_prefix"))
+        path = dut.GetPath("compressed")
+        with open(f"{path}/README", encoding="utf-8") as f:
+            self.assertEqual(f.read(), "This package is empty.\n")
 
     def test_parser_file(self):
         """Calls every combination of arguments for the Parser methods which
@@ -119,6 +148,46 @@ class TestParsing(unittest.TestCase):
             file_contents=sdf_contents, file_type="sdf")
         self.assertIsInstance(results[0], ModelInstanceIndex)
 
+        # Check the related AddModel overload.
+        plant = MultibodyPlant(time_step=0.01)
+        parser = Parser(plant=plant)
+        results = parser.AddModels(
+            file_contents=sdf_contents, file_type="sdf")
+        self.assertIsInstance(results[0], ModelInstanceIndex)
+
+    def test_parser_url(self):
+        """Tests for AddModelsFromUrl as well as its related AddModel overload.
+        """
+        sdf_url = "package://drake/multibody/benchmarks/acrobot/acrobot.sdf"
+
+        plant = MultibodyPlant(time_step=0.01)
+        results = Parser(plant).AddModelsFromUrl(url=sdf_url)
+        self.assertIsInstance(results[0], ModelInstanceIndex)
+
+        plant = MultibodyPlant(time_step=0.01)
+        results = Parser(plant).AddModels(url=sdf_url)
+        self.assertIsInstance(results[0], ModelInstanceIndex)
+
+    def test_parser_prefix_constructors(self):
+        model = "<robot name='r'><link name='a'/></robot>"
+        plant = MultibodyPlant(time_step=0.0)
+        scene_graph = SceneGraph()
+
+        Parser(plant=plant).AddModelsFromString(model, "urdf")
+
+        # Reload the same model, via a different parser constructor. Catch the
+        # name collision.
+        with self.assertRaisesRegex(RuntimeError, r'.*names must be unique.*'):
+            Parser(plant=plant, scene_graph=scene_graph).AddModelsFromString(
+                model, "urdf")
+
+        # Reload the same model, but use model_name_prefix to avoid name
+        # collisions.
+        Parser(plant=plant, model_name_prefix="prefix1").AddModelsFromString(
+            model, "urdf")
+        Parser(plant=plant, scene_graph=scene_graph,
+               model_name_prefix="prefix2").AddModelsFromString(model, "urdf")
+
     def test_strict(self):
         model = """<robot name='robot' version='0.99'>
             <link name='a'/>
@@ -133,13 +202,26 @@ class TestParsing(unittest.TestCase):
         plant = MultibodyPlant(time_step=0.01)
         parser = Parser(plant=plant)
         parser.SetStrictParsing()
-        with self.assertRaises(RuntimeError) as e:
-            result = parser.AddModelsFromString(
-                file_contents=model, file_type='urdf')
-        pattern = r'.*version.*ignored.*'
-        message = str(e.exception)
-        match = re.match(pattern, message)
-        self.assertTrue(match, f'"{message}" does not match "{pattern}"')
+        with self.assertRaisesRegex(RuntimeError, r'.*version.*ignored.*'):
+            parser.AddModelsFromString(file_contents=model, file_type='urdf')
+
+    def test_auto_renaming(self):
+        model = """<robot name='robot' version='0.99'>
+            <link name='a'/>
+            </robot>"""
+        plant = MultibodyPlant(time_step=0.01)
+        parser = Parser(plant=plant)
+        self.assertFalse(parser.GetAutoRenaming())
+        results = parser.AddModelsFromString(
+            file_contents=model, file_type='urdf')
+        self.assertIsInstance(results[0], ModelInstanceIndex)
+        # Reload without auto-renaming; fail.
+        with self.assertRaisesRegex(RuntimeError, r''):
+            parser.AddModelsFromString(model, 'urdf')
+        # Enable renaming and subsequently succeed with reload.
+        parser.SetAutoRenaming(value=True)
+        results = parser.AddModelsFromString(model, 'urdf')
+        self.assertTrue(plant.HasModelInstanceNamed('robot_1'))
 
     def test_model_instance_info(self):
         """Checks that ModelInstanceInfo bindings exist."""
@@ -153,7 +235,8 @@ class TestParsing(unittest.TestCase):
     def test_scoped_frame_names(self):
         plant = MultibodyPlant(time_step=0.01)
         frame = GetScopedFrameByName(plant, "world")
-        self.assertIsNotNone(GetScopedFrameName(plant, frame))
+        with catch_drake_warnings(expected_count=1):
+            self.assertIsNotNone(GetScopedFrameName(plant, frame))
 
     def _make_plant_parser_directives(self):
         """Returns a tuple (plant, parser, directives) for later testing."""

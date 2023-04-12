@@ -174,7 +174,7 @@ TEST_F(SpringMassTest, VelocitiesPermutation) {
 // correspond to that of the first spring only.
 TEST_F(SpringMassTest, ProblemData) {
   // We setup the problem with two distinct initial velocities so that v* for
-  // each clique is also distinct and we can tell them appart.
+  // each clique is also distinct and we can tell them apart.
   const Vector3d v1(1., 2., 3.);
   const Vector3d v2(4., 5., 6.);
   const Vector6d v = (Vector6d() << v1, v2).finished();
@@ -436,7 +436,7 @@ class DummyModel {
 // allows us to test the case of partial DOFs permutations in the model.
 // In this new DummyModelTest fixture, we introduce non-trivial numeric values
 // of the Jacobian matrices, bias terms and regularization. This allows us to
-// perform tests on operatations such as cost and gradients using non-trivial
+// perform tests on operations such as cost and gradients using non-trivial
 // numerical values.
 class DummyModelTest : public ::testing::Test {
  public:
@@ -572,6 +572,8 @@ class DummyModelTest : public ::testing::Test {
 
     // Now we compute a diagonal scaling for each constraints by taking the RMS
     // norm of the diagonal block for that constraint.
+    // The i-th entry in W_diagonal_approximation must contain the approximation
+    // corresponding to the i-th constraint.
     VectorXd W_diagonal_approximation =
         VectorXd::Zero(sap_problem_->num_constraints());
     for (int i = 0; i < sap_problem_->num_constraints(); ++i) {
@@ -579,19 +581,28 @@ class DummyModelTest : public ::testing::Test {
           W_approximation[i].norm() / W_approximation[i].rows();
     }
 
-    // Since SapModel permutes the constraints, we must ensure the result is in
-    // the same ordering.
+    // We make cluster_indexes store constraint indexes in the order specified
+    // by the SapModel (by clusters).
+    std::vector<int> cluster_indexes(sap_problem_->num_constraints());
     const ContactProblemGraph& graph = sap_problem_->graph();
-    VectorXd W_diag_expected(sap_problem_->num_constraints());
     int i_permuted = 0;
     for (const auto& cluster : graph.clusters()) {
       for (int i : cluster.constraint_index()) {
-        W_diag_expected[i_permuted] = W_diagonal_approximation[i];
-        ++i_permuted;
+        cluster_indexes[i_permuted++] = i;
       }
     }
 
-    return W_diag_expected;
+    // According to the documentation of
+    // SapModel::CalcDelassusDiagonalApproximation(), entries in the Delassus
+    // operator diagonal approximation should be ordered by constraints, not by
+    // constraint clusters. Here we make sure that, for this problem, clusters
+    // are not ordered. This way we ensure the test wouldn't accidentally pass
+    // because W_diagonal_approximation happens to be ordered by constraints
+    // because constraint clusters are ordered.
+    EXPECT_FALSE(
+        std::is_sorted(cluster_indexes.begin(), cluster_indexes.end()));
+
+    return W_diagonal_approximation;
   }
 
  protected:

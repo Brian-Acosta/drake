@@ -974,11 +974,13 @@ TEST_F(DiagramTest, AllocateInputs) {
 }
 
 TEST_F(DiagramTest, GetSubsystemByName) {
+  EXPECT_TRUE(diagram_->HasSubsystemNamed("stateless"));
   const System<double>& stateless = diagram_->GetSubsystemByName("stateless");
   EXPECT_NE(
       dynamic_cast<const StatelessSystem<double>*>(&stateless),
       nullptr);
 
+  EXPECT_FALSE(diagram_->HasSubsystemNamed("not_a_subsystem"));
   DRAKE_EXPECT_THROWS_MESSAGE(
       diagram_->GetSubsystemByName("not_a_subsystem"),
       "System .* does not have a subsystem named not_a_subsystem");
@@ -1565,7 +1567,7 @@ class FeedbackDiagram : public Diagram<T> {
   // Scalar-converting copy constructor.
   template <typename U>
   explicit FeedbackDiagram(const FeedbackDiagram<U>& other)
-      : Diagram<T>(other) {}
+      : Diagram<T>(SystemTypeTag<FeedbackDiagram>{}, other) {}
 };
 
 // Tests that since there are no outputs, there is no direct feedthrough.
@@ -1592,6 +1594,11 @@ TEST_F(DiagramTest, SubclassTransmogrificationTest) {
   EXPECT_TRUE(is_symbolic_convertible(dut, [](const auto& converted) {
     EXPECT_FALSE(converted.HasAnyDirectFeedthrough());
   }));
+
+  // Check that the subtype makes it all the way through cloning.
+  // Any mismatched subtype will fail-fast within the Clone implementation.
+  std::unique_ptr<FeedbackDiagram<double>> copy = System<double>::Clone(dut);
+  EXPECT_NE(copy, nullptr);
 
   // Diagram subclasses that declare a specific SystemTypeTag but then use a
   // subclass at runtime will fail-fast.

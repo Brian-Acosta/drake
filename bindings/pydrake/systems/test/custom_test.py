@@ -76,7 +76,7 @@ class CustomAdder(LeafSystem):
         sum = sum_data.get_mutable_value()
         sum[:] = 0
         for i in range(context.num_input_ports()):
-            input_vector = self.EvalVectorInput(context, i)
+            input_vector = self.EvalVectorInput(context=context, port_index=i)
             sum += input_vector.get_value()
 
 
@@ -264,7 +264,7 @@ class TestCustom(unittest.TestCase):
         self.assertIsInstance(cache_entry_value, CacheEntryValue)
         data = cache_entry_value.GetMutableValueOrThrow()
         self.assertIsInstance(data, SimpleNamespace)
-        # This has not yet been upated.
+        # This has not yet been updated.
         self.assertFalse(hasattr(data, "updated"))
         # Const flavor access.
         cache_entry_value_const = cache_entry.get_cache_entry_value(context)
@@ -297,9 +297,8 @@ class TestCustom(unittest.TestCase):
             def __init__(self):
                 pass
 
-        with self.assertRaises(TypeError) as cm:
+        with self.assertRaisesRegex(TypeError, "LeafSystem.*__init__"):
             Oops()
-        self.assertIn("LeafSystem_[float].__init__", str(cm.exception))
 
     def test_all_leaf_system_overrides(self):
         test = self
@@ -335,9 +334,6 @@ class TestCustom(unittest.TestCase):
                 self.DeclarePeriodicPublishNoHandler(1.0, 0)
                 self.DeclarePeriodicPublishNoHandler(
                     period_sec=1.0, offset_sec=0)
-                # Deprecated
-                with catch_drake_warnings(expected_count=1):
-                    self.DeclarePeriodicPublish(period_sec=1.0, offset_sec=0)
                 self.DeclareInitializationPublishEvent(
                     publish=self._on_initialize_publish)
                 self.DeclareInitializationDiscreteUpdateEvent(
@@ -350,10 +346,6 @@ class TestCustom(unittest.TestCase):
                         callback=self._on_initialize))
                 self.DeclarePeriodicDiscreteUpdateNoHandler(
                     period_sec=1.0, offset_sec=0.)
-                # Deprecated
-                with catch_drake_warnings(expected_count=1):
-                    self.DeclarePeriodicDiscreteUpdate(
-                        period_sec=1.0, offset_sec=0.)
                 self.DeclarePeriodicPublishEvent(
                     period_sec=1.0,
                     offset_sec=0,
@@ -588,12 +580,6 @@ class TestCustom(unittest.TestCase):
         self.assertTrue(system.called_publish)
         self.assertTrue(system.called_forced_publish)
 
-        # Deprecated
-        system.called_forced_publish = False
-        with catch_drake_warnings(expected_count=1):
-            system.Publish(context)
-        self.assertTrue(system.called_forced_publish)
-
         context_update = context.Clone()
         system.CalcTimeDerivatives(
             context=context,
@@ -623,26 +609,10 @@ class TestCustom(unittest.TestCase):
         self.assertTrue(system.called_discrete)
         self.assertTrue(system.called_forced_discrete)
 
-        # Deprecated
-        system.called_forced_discrete = False
-        with catch_drake_warnings(expected_count=1):
-            system.CalcDiscreteVariableUpdates(
-                context=context,
-                discrete_state=context_update.get_mutable_discrete_state())
-        self.assertTrue(system.called_forced_discrete)
-
         system.CalcForcedUnrestrictedUpdate(
             context=context,
             state=context_update.get_mutable_state()
         )
-        self.assertTrue(system.called_forced_unrestricted)
-
-        # Deprecated
-        system.called_forced_unrestricted = False
-        with catch_drake_warnings(expected_count=1):
-            system.CalcUnrestrictedUpdate(
-                context=context,
-                state=context_update.get_mutable_state())
         self.assertTrue(system.called_forced_unrestricted)
 
         # Test per-step, periodic, and witness call backs
@@ -834,14 +804,17 @@ class TestCustom(unittest.TestCase):
         # Existence check.
         self.assertIsNot(
             diagram.GetMutableSubsystemState(system, context), None)
-        subcontext = diagram.GetMutableSubsystemContext(system, context)
+        subcontext = diagram.GetMutableSubsystemContext(subsystem=system,
+                                                        context=context)
         self.assertIsNot(subcontext, None)
         self.assertIs(
-            diagram.GetSubsystemContext(system, context), subcontext)
-        subcontext2 = system.GetMyMutableContextFromRoot(context)
+            diagram.GetSubsystemContext(subsystem=system, context=context),
+            subcontext)
+        subcontext2 = system.GetMyMutableContextFromRoot(root_context=context)
         self.assertIsNot(subcontext2, None)
         self.assertIs(subcontext2, subcontext)
-        self.assertIs(system.GetMyContextFromRoot(context), subcontext2)
+        self.assertIs(system.GetMyContextFromRoot(root_context=context),
+                      subcontext2)
 
     def test_continuous_state_api(self):
         # N.B. Since this has trivial operations, we can test all scalar types.
@@ -877,7 +850,8 @@ class TestCustom(unittest.TestCase):
                 self.assertEqual(
                     context.get_continuous_state_vector().size(), 6)
                 self.assertEqual(system.AllocateTimeDerivatives().size(), 6)
-                self.assertEqual(system.EvalTimeDerivatives(context).size(), 6)
+                self.assertEqual(
+                    system.EvalTimeDerivatives(context=context).size(), 6)
 
     def test_discrete_state_api(self):
         # N.B. Since this has trivial operations, we can test all scalar types.
@@ -932,7 +906,7 @@ class TestCustom(unittest.TestCase):
 
                 def DoCalcAbstractOutput(self, context, y_data):
                     input_value = self.EvalAbstractInput(
-                        context, 0).get_value()
+                        context=context, port_index=0).get_value()
                     # The allocator function will populate the output with
                     # the "input"
                     assert_value_equal(input_value, expected_input_value)
@@ -950,3 +924,62 @@ class TestCustom(unittest.TestCase):
             system.CalcOutput(context, output)
             value = output.get_data(0)
             self.assertEqual(value.get_value(), expected_output_value)
+
+    def assert_equal_but_not_aliased(self, a, b):
+        self.assertEqual(a, b)
+        self.assertIsNot(a, b)
+
+    def test_context_and_value_object_set_from(self):
+        """
+        Shows how `Value[object]` behaves in a context, especially in
+        connection to `Context.SetTimeStateAndParametersFrom()`.
+
+        Helps to highlight failure mode illustrated in #18653.
+        """
+        arbitrary_object = {"key": "value"}
+
+        class SystemWithCacheAndState(LeafSystem):
+            def __init__(self):
+                super().__init__()
+                model_value = AbstractValue.Make(arbitrary_object)
+                self.state_index = self.DeclareAbstractState(model_value)
+
+                def calc_cache_noop(context, abstract_value):
+                    pass
+
+                self.cache_entry = self.DeclareCacheEntry(
+                    description="test",
+                    value_producer=ValueProducer(
+                        allocate=model_value.Clone,
+                        calc=calc_cache_noop,
+                    ),
+                )
+
+            def eval_state(self, context):
+                return context.get_abstract_state(self.state_index).get_value()
+
+        system = SystemWithCacheAndState()
+        context = system.CreateDefaultContext()
+        context_init = context.Clone()
+
+        cache = system.cache_entry.Eval(context)
+        self.assert_equal_but_not_aliased(cache, arbitrary_object)
+        state = system.eval_state(context)
+        self.assert_equal_but_not_aliased(state, arbitrary_object)
+
+        def check_set_from():
+            nonlocal cache, state
+            context.SetTimeStateAndParametersFrom(context_init)
+            # Ensure that we have cloned the object.
+            old_state = state
+            state = system.eval_state(context)
+            self.assert_equal_but_not_aliased(state, old_state)
+            # Warning: Cache objects are not cloned!
+            old_cache = cache
+            cache = system.cache_entry.Eval(context)
+            self.assertIs(cache, old_cache)
+
+        # Check twice. Per #18653, if we did not implement
+        # Value[object].SetFrom() correctly, this would fail the second time.
+        check_set_from()
+        check_set_from()

@@ -36,9 +36,18 @@ const double kInf = std::numeric_limits<double>::infinity();
 std::ostream& operator<<(std::ostream& os, CostForm value) {
   os << "CostForm::";
   switch (value) {
-    case CostForm::kGeneric: { os << "kGeneric"; return os; }
-    case CostForm::kNonSymbolic: { os << "kNonSymbolic"; return os; }
-    case CostForm::kSymbolic: { os << "kSymbolic"; return os; }
+    case CostForm::kGeneric: {
+      os << "kGeneric";
+      return os;
+    }
+    case CostForm::kNonSymbolic: {
+      os << "kNonSymbolic";
+      return os;
+    }
+    case CostForm::kSymbolic: {
+      os << "kSymbolic";
+      return os;
+    }
   }
   DRAKE_UNREACHABLE();
 }
@@ -46,14 +55,25 @@ std::ostream& operator<<(std::ostream& os, CostForm value) {
 std::ostream& operator<<(std::ostream& os, ConstraintForm value) {
   os << "ConstraintForm::";
   switch (value) {
-    case ConstraintForm::kGeneric: { os << "kGeneric"; return os; }
-    case ConstraintForm::kNonSymbolic: { os << "kNonSymbolic"; return os; }
-    case ConstraintForm::kSymbolic: { os << "kSymbolic"; return os; }
-    case ConstraintForm::kFormula: { os << "kFormula"; return os; }
+    case ConstraintForm::kGeneric: {
+      os << "kGeneric";
+      return os;
+    }
+    case ConstraintForm::kNonSymbolic: {
+      os << "kNonSymbolic";
+      return os;
+    }
+    case ConstraintForm::kSymbolic: {
+      os << "kSymbolic";
+      return os;
+    }
+    case ConstraintForm::kFormula: {
+      os << "kFormula";
+      return os;
+    }
   }
   DRAKE_UNREACHABLE();
 }
-
 
 std::set<CostForm> linear_cost_form() {
   return std::set<CostForm>{CostForm::kNonSymbolic, CostForm::kSymbolic};
@@ -398,15 +418,13 @@ void LowerBoundedProblem::CheckSolution(
 
 Vector6<double> LowerBoundedProblem::initial_guess1() const {
   std::srand(0);
-  Vector6d delta =
-      0.05 * Vector6d::Random();
+  Vector6d delta = 0.05 * Vector6d::Random();
   return x_expected_ + delta;
 }
 
 Vector6<double> LowerBoundedProblem::initial_guess2() const {
   std::srand(0);
-  Vector6d delta =
-      0.05 * Vector6d::Random();
+  Vector6d delta = 0.05 * Vector6d::Random();
   return x_expected_ - delta;
 }
 
@@ -840,7 +858,7 @@ void TestL2NormCost(const SolverInterface& solver, double tol) {
   auto x = prog.NewContinuousVariables(2, "x");
 
   prog.AddL2NormCost(Matrix2d::Identity(), Vector2d::Zero(), x);
-  prog.AddLinearConstraint(2*x[0] + x[1] >= 1);
+  prog.AddLinearConstraint(2 * x[0] + x[1] >= 1);
 
   MathematicalProgramResult result;
   solver.Solve(prog, std::nullopt, std::nullopt, &result);
@@ -931,6 +949,32 @@ void DuplicatedVariableNonlinearProgram1::CheckSolution(
   }
 }
 
+QuadraticEqualityConstrainedProgram1::QuadraticEqualityConstrainedProgram1()
+    : prog_{new MathematicalProgram()}, x_{prog_->NewContinuousVariables<2>()} {
+  prog_->AddLinearCost(-x_(0) - 2 * x_(1));
+  prog_->AddQuadraticConstraint(
+      x_(0) * x_(0) + x_(1) * x_(1), 1, 1,
+      QuadraticConstraint::HessianType::kPositiveSemidefinite);
+}
+
+void QuadraticEqualityConstrainedProgram1::CheckSolution(
+    const SolverInterface& solver, const Eigen::Vector2d& x_init,
+    const std::optional<SolverOptions>& solver_options, double tol,
+    bool check_dual) const {
+  if (solver.available()) {
+    MathematicalProgramResult result;
+    solver.Solve(*prog_, x_init, solver_options, &result);
+    EXPECT_TRUE(result.is_success());
+    const auto x_sol = result.GetSolution(x_);
+    EXPECT_TRUE(CompareMatrices(
+        x_sol, Eigen::Vector2d(1 / std::sqrt(5), 2 / std::sqrt(5)), tol));
+    if (check_dual) {
+      EXPECT_TRUE(CompareMatrices(
+          result.GetDualSolution(prog_->quadratic_constraints()[0]),
+          Vector1d(-std::sqrt(5) / 2), tol));
+    }
+  }
+}
 }  // namespace test
 }  // namespace solvers
 }  // namespace drake

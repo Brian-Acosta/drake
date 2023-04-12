@@ -177,22 +177,6 @@ class TestSystem : public LeafSystem<T> {
     this->DeclarePeriodicPublishNoHandler(period);
   }
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  // DEPRECATED remove 2023-03-01
-  void AddPeriodicUpdateDeprecated(double period, double offset) {
-    this->DeclarePeriodicDiscreteUpdate(period, offset);
-  }
-
-  void AddPeriodicUnrestrictedUpdateDeprecated(double period, double offset) {
-    this->DeclarePeriodicUnrestrictedUpdate(period, offset);
-  }
-
-  void AddPublishDeprecated(double period, double offset) {
-    this->DeclarePeriodicPublish(period, offset);
-  }
-#pragma GCC diagnostic pop
-
   void DoCalcTimeDerivatives(const Context<T>& context,
                              ContinuousState<T>* derivatives) const override {}
 
@@ -631,26 +615,6 @@ TEST_F(LeafSystemTest, EventsAtTheSameTime) {
     EXPECT_EQ(events.size(), 1);
     EXPECT_EQ(events.front()->get_trigger_type(), TriggerType::kPeriodic);
   }
-}
-
-// DEPRECATED remove 2023-03-01
-TEST_F(LeafSystemTest, DeprecatedNoHandlerMethodsStillWork) {
-  system_.AddPublishDeprecated(0.125, 0.5);
-  system_.AddPeriodicUpdateDeprecated(0.25, 0.75);
-  system_.AddPeriodicUnrestrictedUpdateDeprecated(0.5, 1.0);
-
-  auto collection = system_.AllocateCompositeEventCollection();
-  system_.GetPeriodicEvents(context_, collection.get());
-
-  auto& leaf_collection =
-      *dynamic_cast<const LeafCompositeEventCollection<double>*>(
-          collection.get());
-  EXPECT_EQ(
-      leaf_collection.get_publish_events().get_events().size(), 1);
-  EXPECT_EQ(
-      leaf_collection.get_discrete_update_events().get_events().size(), 1);
-  EXPECT_EQ(
-      leaf_collection.get_unrestricted_update_events().get_events().size(), 1);
 }
 
 // Tests that if the current time is exactly the offset, the next
@@ -2291,6 +2255,84 @@ GTEST_TEST(LeafSystemScalarConverterTest, SymbolicNo) {
   EXPECT_EQ(dut.ToScalarTypeMaybe<symbolic::Expression>(), nullptr);
 }
 
+// Check all scenarios of Clone() passing. The SymbolicSparsitySystem supports
+// all scalar type conversions, so Clone() should always succeed.
+GTEST_TEST(LeafSystemCloneTest, Supported) {
+  auto dut_double = std::make_unique<SymbolicSparsitySystem<double>>();
+  dut_double->set_name("dut_double");
+  auto context_double = dut_double->CreateDefaultContext();
+
+  auto copy_double = dut_double->Clone();
+  ASSERT_NE(copy_double, nullptr);
+  EXPECT_EQ(copy_double->get_name(), "dut_double");
+  DRAKE_EXPECT_THROWS_MESSAGE(copy_double->ValidateContext(*context_double),
+                              "[^]*Context-System mismatch[^]*");
+
+  auto dut_autodiff = std::make_unique<SymbolicSparsitySystem<AutoDiffXd>>();
+  dut_autodiff->set_name("dut_autodiff");
+  auto context_autodiff = dut_autodiff->CreateDefaultContext();
+
+  auto copy_autodiff = dut_autodiff->Clone();
+  ASSERT_NE(copy_autodiff, nullptr);
+  EXPECT_EQ(copy_autodiff->get_name(), "dut_autodiff");
+  DRAKE_EXPECT_THROWS_MESSAGE(copy_autodiff->ValidateContext(*context_autodiff),
+                              "[^]*Context-System mismatch[^]*");
+
+  auto dut_symbolic =
+      std::make_unique<SymbolicSparsitySystem<symbolic::Expression>>();
+  dut_symbolic->set_name("dut_symbolic");
+  auto context_symbolic = dut_symbolic->CreateDefaultContext();
+
+  auto copy_symbolic = dut_symbolic->Clone();
+  ASSERT_NE(copy_symbolic, nullptr);
+  EXPECT_EQ(copy_symbolic->get_name(), "dut_symbolic");
+  DRAKE_EXPECT_THROWS_MESSAGE(copy_symbolic->ValidateContext(*context_symbolic),
+                              "[^]*Context-System mismatch[^]*");
+}
+
+// Check that the static Clone(foo) preserves the subtype.
+GTEST_TEST(LeafSystemCloneTest, SupportedStatic) {
+  SymbolicSparsitySystem<double> dut;
+  std::unique_ptr<SymbolicSparsitySystem<double>> copy =
+      System<double>::Clone(dut);
+  ASSERT_NE(copy, nullptr);
+}
+
+// This system can only convert from a scalar type of double.
+template <typename T>
+class FromDoubleSystem final : public LeafSystem<T> {
+ public:
+  DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(FromDoubleSystem);
+
+  // Default constructor declares support for scalar conversion.
+  FromDoubleSystem() : LeafSystem<T>(SystemTypeTag<FromDoubleSystem>{}) {}
+
+  // Scalar-conversion constructor (with a dummy arg to avoid ambiguity).
+  explicit FromDoubleSystem(const FromDoubleSystem<double>& other,
+                            int dummy = 0)
+      : FromDoubleSystem() {}
+};
+
+}  // namespace
+namespace scalar_conversion {
+template <> struct Traits<FromDoubleSystem> : public FromDoubleTraits {};
+}  // namespace scalar_conversion
+namespace {
+
+// Check the message from a Clone() failing. These particular tests excercise
+// the current set of conditions that prevent cloning. If we enhance Clone()
+// to be more capable they might start passing, in which case we should update
+// the test to cover whatever remaining circumstances don't support cloning.
+GTEST_TEST(LeafSystemCloneTest, Unsupported) {
+  // The TestSystem does not support scalar conversion, so it cannot be cloned.
+  DRAKE_EXPECT_THROWS_MESSAGE(TestSystem<double>{}.Clone(),
+                              ".*does not support Clon.*");
+
+  // Systems that allow double -> autodiff but not vice versa cannot be cloned.
+  DRAKE_EXPECT_THROWS_MESSAGE(FromDoubleSystem<double>{}.Clone(),
+                              ".*does not support Clon.*");
+}
+
 GTEST_TEST(GraphvizTest, Attributes) {
   DefaultFeedthroughSystem system;
   // Check that the ID is the memory address.
@@ -2838,23 +2880,6 @@ GTEST_TEST(InitializationTest, InitializationTest) {
   EXPECT_TRUE(dut.get_pub_init());
   EXPECT_TRUE(dut.get_dis_update_init());
   EXPECT_TRUE(dut.get_unres_update_init());
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  // Make sure the deprecated spelling still works (remove 2023-03-01).
-  InitializationTestSystem dut_deprecated;
-  EXPECT_FALSE(dut_deprecated.get_dis_update_init());
-  auto context_deprecated = dut_deprecated.CreateDefaultContext();
-  auto discrete_deprecated = dut_deprecated.AllocateDiscreteVariables();
-  auto init_events_deprecated =
-      dut_deprecated.AllocateCompositeEventCollection();
-  dut_deprecated.GetInitializationEvents(*context_deprecated,
-                                         init_events_deprecated.get());
-  dut_deprecated.CalcDiscreteVariableUpdates(
-      *context_deprecated, init_events_deprecated->get_discrete_update_events(),
-      discrete_deprecated.get());
-  EXPECT_TRUE(dut_deprecated.get_dis_update_init());
-#pragma GCC diagnostic pop
 }
 
 // Although many of the tests above validate behavior of events when the
@@ -3047,20 +3072,6 @@ GTEST_TEST(EventSugarTest, HandlersGetCalled) {
   EXPECT_EQ(dut.num_second_discrete_update(), 1);
   EXPECT_EQ(dut.num_unrestricted_update(), 5);
   EXPECT_EQ(dut.num_second_unrestricted_update(), 1);
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  // Make sure the deprecated "forced" spellings still work (remove 2023-03-01)
-  dut.Publish(*context);
-  dut.CalcDiscreteVariableUpdates(*context, &*discrete_state);
-  dut.CalcUnrestrictedUpdate(*context, &*state);
-  EXPECT_EQ(dut.num_publish(), 6);
-  EXPECT_EQ(dut.num_second_publish_handler_publishes(), 2);
-  EXPECT_EQ(dut.num_discrete_update(), 6);
-  EXPECT_EQ(dut.num_second_discrete_update(), 2);
-  EXPECT_EQ(dut.num_unrestricted_update(), 6);
-  EXPECT_EQ(dut.num_second_unrestricted_update(), 2);
-#pragma GCC diagnostic pop
 }
 
 // A System that does not override the default implicit time derivatives

@@ -8,7 +8,11 @@ from .meshcat import *  # noqa
 from .optimization import *  # noqa
 from .parsing import *  # noqa
 from .plant import *  # noqa
+from .rational import *  # noqa
 from .tree import *  # noqa
 
 # Submodules.
 from .benchmarks.all import *  # noqa
+
+# Main programs.
+from . import mesh_to_model

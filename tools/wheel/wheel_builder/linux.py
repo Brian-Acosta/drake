@@ -2,6 +2,7 @@
 # //tools/wheel:builder for the user interface.
 
 import atexit
+import io
 import os
 import pathlib
 import subprocess
@@ -42,6 +43,11 @@ targets = (
         test_platform=Platform('ubuntu', '22.04', 'jammy'),
         python_version_tuple=(3, 10, 6),
         python_sha='f795ff87d11d4b0c7c33bc8851b0c28648d8a4583aa2100a98c22b4326b6d3f3'),  # noqa
+    Target(
+        build_platform=Platform('ubuntu', '20.04', 'focal'),
+        test_platform=Platform('ubuntu', '22.04', 'jammy'),
+        python_version_tuple=(3, 11, 1),
+        python_sha='85879192f2cffd56cb16c092905949ebf3e5e394b7f764723529637901dfb58f'),  # noqa
 )
 glibc_versions = {
     'focal': '2_31',
@@ -133,14 +139,29 @@ def _create_source_tar(path):
     """
     Creates a tarball of the repository working tree.
     """
-    out = tarfile.open(path, "w:xz")
-
-    repo_dir = _git_root(resource_root)
-
     print('[-] Creating source archive', end='', flush=True)
+    out = tarfile.open(path, 'w:xz')
+
+    # Add an rcfile that's compatible with our Dockerfile base.
+    rc_lines = [
+        'import %workspace%/tools/ubuntu.bazelrc',
+        'import %workspace%/tools/ubuntu-focal.bazelrc',
+    ]
+    rc_bytes = '\n'.join(rc_lines).encode('utf-8')
+    tarinfo = tarfile.TarInfo('gen/environment.bazelrc')
+    tarinfo.size = len(rc_bytes)
+    out.addfile(tarinfo, io.BytesIO(rc_bytes))
+
+    # Walk the git root and archive almost every file we find.
+    repo_dir = _git_root(resource_root)
     for f in sorted(os.listdir(repo_dir)):
         # Exclude build and VCS directories.
         if f == '.git' or f == 'user.bazelrc' or f.startswith('bazel-'):
+            continue
+
+        # Exclude host-generated setup files; we want the container-relevant
+        # setup file (already added atop this function).
+        if f == 'gen':
             continue
 
         print('.', end='', flush=True)
@@ -259,7 +280,7 @@ def _test_wheel(target, identifier, options):
     if options.tag_stages:
         base_image = _tagname(target, TEST, 'test')
     else:
-        base_image = test_container
+        base_image = test_image
     test_dir = os.path.join(resource_root, 'test')
 
     # Build the test base image.
@@ -309,13 +330,10 @@ def build(options):
         die('Nothing to do! (Platform and/or Python version selection '
             'resulted in an empty set of wheels)')
 
-    # Generate a unique identifier for this build, if needed.
-    if options.tag_stages:
-        identifier = None
-    else:
-        salt = os.urandom(8).hex()
-        time = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
-        identifier = f'{time}-{salt}'
+    # Generate a unique identifier for this build.
+    salt = os.urandom(8).hex()
+    time = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
+    identifier = f'{time}-{salt}'
 
     # Generate the repository source archive.
     source_tar = os.path.join(resource_root, 'image', 'drake-src.tar.xz')

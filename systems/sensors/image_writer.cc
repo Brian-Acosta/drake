@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include "fmt/ostream.h"
+#include <fmt/format.h>
 #include <vtkImageData.h>
 #include <vtkNew.h>
 #include <vtkPNGWriter.h>
@@ -174,6 +174,49 @@ const InputPort<double>& ImageWriter::DeclareImageInputPort(
   port_info_.emplace_back(std::move(file_name_format), kPixelType);
 
   return port;
+}
+
+const InputPort<double>& ImageWriter::DeclareImageInputPort(
+    PixelType pixel_type, std::string port_name, std::string file_name_format,
+    double publish_period, double start_time) {
+  switch (pixel_type) {
+    case PixelType::kRgb8U:
+      break;
+    case PixelType::kBgr8U:
+      break;
+    case PixelType::kRgba8U: {
+      return this->template DeclareImageInputPort<PixelType::kRgba8U>(
+          std::move(port_name), std::move(file_name_format), publish_period,
+          start_time);
+    }
+    case PixelType::kBgra8U:
+      break;
+    case PixelType::kDepth16U: {
+      return this->template DeclareImageInputPort<PixelType::kDepth16U>(
+          std::move(port_name), std::move(file_name_format), publish_period,
+          start_time);
+    }
+    case PixelType::kDepth32F: {
+      return this->template DeclareImageInputPort<PixelType::kDepth32F>(
+          std::move(port_name), std::move(file_name_format), publish_period,
+          start_time);
+    }
+    case PixelType::kLabel16I: {
+      return this->template DeclareImageInputPort<PixelType::kLabel16I>(
+          std::move(port_name), std::move(file_name_format), publish_period,
+          start_time);
+    }
+    case PixelType::kGrey8U: {
+      return this->template DeclareImageInputPort<PixelType::kGrey8U>(
+          std::move(port_name), std::move(file_name_format), publish_period,
+          start_time);
+    }
+    case PixelType::kExpr:
+      break;
+  }
+  throw std::logic_error(fmt::format(
+      "ImageWriter::DeclareImageInputPort does not support pixel_type={}",
+      static_cast<int>(pixel_type)));
 }
 
 template <PixelType kPixelType>

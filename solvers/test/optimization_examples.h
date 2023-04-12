@@ -48,9 +48,9 @@ class OptimizationProgram {
 
   virtual ~OptimizationProgram() {}
 
-  CostForm cost_form() const {return cost_form_;}
+  CostForm cost_form() const { return cost_form_; }
 
-  ConstraintForm constraint_form() const {return constraint_form_;}
+  ConstraintForm constraint_form() const { return constraint_form_; }
 
   MathematicalProgram* prog() const { return prog_.get(); }
 
@@ -142,7 +142,6 @@ class LinearSystemExample3 : public LinearSystemExample2 {
 
   void CheckSolution(const MathematicalProgramResult& result) const override;
 };
-
 
 /**
  * For a stable linear system ẋ = A x, find its Lyapunov function by solving
@@ -575,7 +574,7 @@ class ConvexCubicProgramExample : public MathematicalProgram {
 
   ConvexCubicProgramExample();
 
-  ~ConvexCubicProgramExample() override {};
+  ~ConvexCubicProgramExample() override = default;
 
   void CheckSolution(const MathematicalProgramResult& result) const;
 
@@ -596,7 +595,7 @@ class UnitLengthProgramExample : public MathematicalProgram {
 
   UnitLengthProgramExample();
 
-  ~UnitLengthProgramExample() override {};
+  ~UnitLengthProgramExample() override = default;
 
   void CheckSolution(const MathematicalProgramResult& result,
                      double tolerance) const;
@@ -969,6 +968,23 @@ class DuplicatedVariableNonlinearProgram1 : public ::testing::Test {
       const SolverInterface& solver, const Eigen::Vector2d& x_init,
       const std::optional<SolverOptions>& solver_options = std::nullopt,
       double tol = 1E-7) const;
+
+ protected:
+  std::unique_ptr<MathematicalProgram> prog_;
+  Vector2<symbolic::Variable> x_;
+};
+
+// Test a nonlinear program with quadratic constraints.
+// max x + 2*y
+// s.t x² + y² = 1
+class QuadraticEqualityConstrainedProgram1 : public ::testing::Test {
+ public:
+  QuadraticEqualityConstrainedProgram1();
+
+  void CheckSolution(
+      const SolverInterface& solver, const Eigen::Vector2d& x_init,
+      const std::optional<SolverOptions>& solver_options = std::nullopt,
+      double tol = 1E-7, bool check_dual = true) const;
 
  protected:
   std::unique_ptr<MathematicalProgram> prog_;

@@ -1,3 +1,7 @@
+// TODO(jwnimmer-tri) Port GetGraphvizString to fmt, once we have sufficient
+// options there to control precision and scientific formatting.
+#undef EIGEN_NO_IO
+
 #include "drake/geometry/optimization/graph_of_convex_sets.h"
 
 #include <limits>
@@ -1085,34 +1089,6 @@ MathematicalProgramResult GraphOfConvexSets::SolveShortestPath(
 MathematicalProgramResult GraphOfConvexSets::SolveShortestPath(
     const Vertex& source, const Vertex& target,
     const GraphOfConvexSetsOptions& options) const {
-  return SolveShortestPath(source.id(), target.id(), options);
-}
-
-MathematicalProgramResult GraphOfConvexSets::SolveShortestPath(
-    VertexId source_id, VertexId target_id, bool convex_relaxation,
-    const solvers::SolverInterface* solver,
-    const std::optional<solvers::SolverOptions>& solver_options) const {
-  GraphOfConvexSetsOptions options;
-  options.convex_relaxation = convex_relaxation;
-  options.solver = solver;
-  if (solver_options) {
-    options.solver_options = *solver_options;
-  }
-  options.preprocessing = false;
-  return SolveShortestPath(source_id, target_id, options);
-}
-
-MathematicalProgramResult GraphOfConvexSets::SolveShortestPath(
-    const Vertex& source, const Vertex& target, bool convex_relaxation,
-    const solvers::SolverInterface* solver,
-    const std::optional<solvers::SolverOptions>& solver_options) const {
-  GraphOfConvexSetsOptions options;
-  options.convex_relaxation = convex_relaxation;
-  options.solver = solver;
-  if (solver_options) {
-    options.solver_options = *solver_options;
-  }
-  options.preprocessing = false;
   return SolveShortestPath(source.id(), target.id(), options);
 }
 

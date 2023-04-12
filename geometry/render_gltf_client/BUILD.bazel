@@ -1,5 +1,3 @@
-# -*- python -*-
-
 load(
     "@drake//tools/skylark:drake_cc.bzl",
     "drake_cc_binary",
@@ -19,8 +17,7 @@ package(default_visibility = ["//visibility:private"])
 
 drake_cc_package_library(
     name = "render_gltf_client",
-    # TODO(jwnimmer-tri) Make public once we add libcurl to the wheel builds.
-    visibility = ["//visibility:private"],
+    visibility = ["//visibility:public"],
     deps = [
         ":factory",
         ":render_engine_gltf_client_params",
@@ -31,12 +28,14 @@ drake_cc_library(
     name = "factory",
     srcs = ["factory.cc"],
     hdrs = ["factory.h"],
+    visibility = ["//visibility:public"],
     interface_deps = [
         ":render_engine_gltf_client_params",
-        "//geometry/render:render_camera",
+        "//geometry/render:render_engine",
     ],
     deps = [
         ":internal_render_engine_gltf_client",
+        "//common:network_policy",
     ],
 )
 
@@ -44,7 +43,9 @@ drake_cc_library(
     name = "render_engine_gltf_client_params",
     srcs = ["render_engine_gltf_client_params.cc"],
     hdrs = ["render_engine_gltf_client_params.h"],
+    visibility = ["//visibility:public"],
     deps = [
+        "//common:name_value",
         "//geometry/render:render_label",
     ],
 )
@@ -125,11 +126,21 @@ drake_cc_library(
 
 drake_cc_googletest(
     name = "factory_test",
+    allow_network = ["render_gltf_client"],
     deps = [
         ":factory",
         ":internal_render_engine_gltf_client",
         ":render_engine_gltf_client_params",
         "//geometry/render:render_camera",
+    ],
+)
+
+drake_cc_googletest(
+    name = "factory_denied_test",
+    allow_network = ["none"],
+    deps = [
+        ":factory",
+        "//common/test_utilities:expect_throws_message",
     ],
 )
 
@@ -282,6 +293,7 @@ drake_py_unittest(
 drake_py_unittest(
     name = "integration_test",
     size = "medium",
+    allow_network = ["render_gltf_client"],
     data = [
         ":client_demo",
         ":server_demo",

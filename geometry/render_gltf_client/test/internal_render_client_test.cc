@@ -11,9 +11,12 @@
 #include <utility>
 #include <vector>
 
+#include <fmt/format.h>
+#include <fmt/ostream.h>
 #include <gtest/gtest.h>
 
 #include "drake/common/find_resource.h"
+#include "drake/common/fmt_eigen.h"
 #include "drake/common/temp_directory.h"
 #include "drake/common/test_utilities/expect_no_throw.h"
 #include "drake/common/test_utilities/expect_throws_message.h"
@@ -37,8 +40,8 @@ void PrintTo(const Image<kPixelType>& image, std::ostream* os) {
     using Stride = Eigen::Stride<Eigen::Dynamic, Eigen::Dynamic>;
     Eigen::Map<const MatrixX<T>, 0, Stride> eigen(
         base, height, width, Stride(num_channels, width * num_channels));
-    *os << "Channel " << z << ":\n";
-    *os << eigen.template cast<Promoted>() << "\n";
+    fmt::print(*os, "Channel {}:\n", z);
+    fmt::print(*os, "{}\n", fmt_eigen(eigen.template cast<Promoted>()));
   }
 }
 }  // namespace sensors
@@ -50,11 +53,11 @@ namespace internal {
 namespace fs = std::filesystem;
 
 using Params = RenderEngineGltfClientParams;
-using geometry::render::ClippingRange;
-using geometry::render::ColorRenderCamera;
-using geometry::render::DepthRange;
-using geometry::render::DepthRenderCamera;
-using geometry::render::RenderCameraCore;
+using render::ClippingRange;
+using render::ColorRenderCamera;
+using render::DepthRange;
+using render::DepthRenderCamera;
+using render::RenderCameraCore;
 using systems::sensors::CameraInfo;
 using systems::sensors::ImageDepth32F;
 using systems::sensors::ImageLabel16I;
@@ -104,7 +107,7 @@ class RenderClientTest : public ::testing::Test {
 
  protected:
   // A per-test-case temporary directory.
-  const fs::path scratch_{drake::temp_directory()};
+  const fs::path scratch_{temp_directory()};
   const std::string fake_scene_path_{scratch_ / "fake_scene.gltf"};
 
   /* The params to create the test RenderClient are to help ensure nothing
@@ -312,13 +315,13 @@ TEST_F(RenderClientTest, RenderOnServerFieldsCheck) {
   image_type = RenderImageType::kColorRgba8U;
   DRAKE_EXPECT_THROWS_MESSAGE(
       client.RenderOnServer(color_camera_.core(), image_type, fake_scene_path_),
-      "[\\s\\S]*ERROR doing POST:[\\s\\S]*");
+      "[\\s\\S]*POST:[\\s\\S]*");
 
   // Check fields for a label render.
   image_type = RenderImageType::kLabel16I;
   DRAKE_EXPECT_THROWS_MESSAGE(
       client.RenderOnServer(color_camera_.core(), image_type, fake_scene_path_),
-      "[\\s\\S]*ERROR doing POST:[\\s\\S]*");
+      "[\\s\\S]*POST:[\\s\\S]*");
 
   /* Check fields for a depth render.  This test also includes a verification
    that the provided mime_type is propagated correctly.  There is no special
@@ -328,7 +331,7 @@ TEST_F(RenderClientTest, RenderOnServerFieldsCheck) {
   DRAKE_EXPECT_THROWS_MESSAGE(
       client.RenderOnServer(depth_camera_.core(), image_type, fake_scene_path_,
                             mime_type, depth_range),
-      "[\\s\\S]*ERROR doing POST:[\\s\\S]*");
+      "[\\s\\S]*POST:[\\s\\S]*");
 }
 
 /* Tests bad `HttpResponse`s that have a server message provided. Edge cases
@@ -389,7 +392,7 @@ TEST_F(RenderClientTest, RenderOnServerNoFileReturn) {
   DRAKE_EXPECT_THROWS_MESSAGE(
       client.RenderOnServer(color_camera_.core(), RenderImageType::kColorRgba8U,
                             fake_scene_path_),
-      "ERROR doing POST.*supposed to respond with a file but did not.");
+      ".*POST.*supposed to respond with a file but did not.");
 }
 
 TEST_F(RenderClientTest, RenderOnServerInvalidImageReturn) {
@@ -587,7 +590,7 @@ TEST_F(RenderClientTest, LoadDepthImageBad) {
   // Failure case 1: invalid extension.
   DRAKE_EXPECT_THROWS_MESSAGE(
       RenderClient::LoadDepthImage("/no/such/file_ext.foo", &ignored),
-      "Unsupported file extension");
+      ".*unsupported file extension");
 
   // Failure case 2: not a valid image file.
   DRAKE_EXPECT_THROWS_MESSAGE(

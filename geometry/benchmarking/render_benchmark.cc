@@ -1,10 +1,9 @@
 #include <unistd.h>
 
 #include <filesystem>
-#include <iostream>
 
-#include "fmt/format.h"
 #include <benchmark/benchmark.h>
+#include <fmt/format.h>
 #include <gflags/gflags.h>
 
 #include "drake/geometry/render_gl/factory.h"
@@ -40,7 +39,6 @@ using render::DepthRange;
 using render::DepthRenderCamera;
 using render::RenderCameraCore;
 using render::RenderEngine;
-using render::RenderEngineGlParams;
 using render::RenderEngineTester;
 using render::RenderLabel;
 using systems::sensors::ImageDepth32F;

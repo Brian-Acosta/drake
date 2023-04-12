@@ -25,7 +25,7 @@
 #include "drake/multibody/tree/linear_bushing_roll_pitch_yaw.h"
 #include "drake/multibody/tree/linear_spring_damper.h"
 #include "drake/multibody/tree/multibody_forces.h"
-#include "drake/multibody/tree/multibody_tree.h"  // `JacobianWrtVariable`
+#include "drake/multibody/tree/multibody_tree.h"
 #include "drake/multibody/tree/multibody_tree_indexes.h"
 #include "drake/multibody/tree/planar_joint.h"
 #include "drake/multibody/tree/prismatic_joint.h"
@@ -79,7 +79,8 @@ void BindMultibodyElementMixin(PyClass* pcls) {
             return self.GetParentPlant();
           })
       .def("__repr__", [](const Class& self) {
-        py::str cls_name = py::cast(&self).get_type().attr("__name__");
+        py::str cls_name =
+            internal::PrettyClassName(py::cast(&self).get_type());
         const int index = self.index();
         const int model_instance = self.model_instance();
         if constexpr (has_name_func<Class>::value) {
@@ -147,6 +148,40 @@ void DoScalarIndependentDefinitions(py::module m) {
         .value("kQDot", Enum::kQDot, enum_doc.kQDot.doc)
         .value("kV", Enum::kV, enum_doc.kV.doc);
   }
+
+  {
+    using Class = ScopedName;
+    constexpr auto& cls_doc = doc.ScopedName;
+    py::class_<Class> cls(m, "ScopedName", cls_doc.doc);
+    cls  // BR
+        .def(py::init<>(), cls_doc.ctor.doc_0args)
+        .def(py::init<std::string_view, std::string_view>(),
+            py::arg("namespace_name"), py::arg("element_name"),
+            cls_doc.ctor.doc_2args)
+        .def_static("Make", &Class::Make, py::arg("namespace_name"),
+            py::arg("element_name"), cls_doc.Make.doc)
+        .def_static("Join", &Class::Join, py::arg("name1"), py::arg("name2"),
+            cls_doc.Join.doc)
+        .def_static(
+            "Parse", &Class::Parse, py::arg("scoped_name"), cls_doc.Parse.doc)
+        .def("get_namespace", &Class::get_namespace, cls_doc.get_namespace.doc)
+        .def("get_element", &Class::get_element, cls_doc.get_element.doc)
+        .def("get_full", &Class::get_full, cls_doc.get_full.doc)
+        .def("to_string", &Class::to_string, cls_doc.to_string.doc)
+        .def("set_namespace", &Class::set_namespace, py::arg("namespace_name"),
+            cls_doc.set_namespace.doc)
+        .def("set_element", &Class::set_element, py::arg("element_name"),
+            cls_doc.set_element.doc)
+        .def("__str__", &Class::to_string, cls_doc.to_string.doc)
+        .def("__repr__", [](const Class& self) {
+          py::str py_namespace = std::string{self.get_namespace()};
+          py::str py_element = std::string{self.get_element()};
+          return fmt::format("ScopedName({}, {})",
+              fmt_streamed(py::repr(py_namespace)),
+              fmt_streamed(py::repr(py_element)));
+        });
+    DefCopyAndDeepCopy(&cls);
+  }
 }
 
 /**
@@ -175,6 +210,7 @@ void DoScalarDependentDefinitions(py::module m, T) {
             cls_doc.is_world_frame.doc)
         .def("is_body_frame", &Class::is_body_frame, cls_doc.is_body_frame.doc)
         .def("name", &Class::name, cls_doc.name.doc)
+        .def("scoped_name", &Class::scoped_name, cls_doc.scoped_name.doc)
         .def("GetFixedPoseInBodyFrame", &Frame<T>::GetFixedPoseInBodyFrame,
             cls_doc.GetFixedPoseInBodyFrame.doc)
         .def("CalcPoseInBodyFrame", &Frame<T>::CalcPoseInBodyFrame,
@@ -260,36 +296,16 @@ void DoScalarDependentDefinitions(py::module m, T) {
                  const RigidTransform<double>&,
                  std::optional<ModelInstanceIndex>>(),
             py::arg("name"), py::arg("P"), py::arg("X_PF"),
-            py::arg("model_instance") = std::nullopt,
-            cls_doc.ctor.doc_4args_name_P_X_PF_model_instance)
-        .def(py_init_deprecated<Class, const Frame<T>&,
-                 const math::RigidTransform<double>&>(
-                 cls_doc.ctor.doc_deprecated_deprecated_2args_P_X_PF),
-            py::arg("P"), py::arg("X_PF"),
-            cls_doc.ctor.doc_deprecated_deprecated_2args_P_X_PF)
+            py::arg("model_instance") = std::nullopt, cls_doc.ctor.doc_4args)
         .def(py::init<const std::string&, const Body<T>&,
                  const math::RigidTransform<double>&>(),
             py::arg("name"), py::arg("bodyB"), py::arg("X_BF"),
-            cls_doc.ctor.doc_3args_name_bodyB_X_BF)
-        .def(py_init_deprecated<Class, const Body<T>&,
-                 const math::RigidTransform<double>&>(
-                 cls_doc.ctor.doc_deprecated_deprecated_2args_bodyB_X_BF),
-            py::arg("bodyB"), py::arg("X_BF"),
-            cls_doc.ctor.doc_deprecated_deprecated_2args_bodyB_X_BF)
+            cls_doc.ctor.doc_3args)
         .def("SetPoseInParentFrame", &Class::SetPoseInParentFrame,
             py::arg("context"), py::arg("X_PF"),
             cls_doc.SetPoseInParentFrame.doc)
         .def("GetPoseInParentFrame", &Class::GetPoseInParentFrame,
             py::arg("context"), cls_doc.GetPoseInParentFrame.doc);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    cls  // BR
-        .def("SetPoseInBodyFrame",
-            WrapDeprecated(cls_doc.SetPoseInBodyFrame.doc_deprecated,
-                &Class::SetPoseInBodyFrame),
-            py::arg("context"), py::arg("X_PF"),
-            cls_doc.SetPoseInBodyFrame.doc_deprecated);
-#pragma GCC diagnostic pop  // pop -Wdeprecated-declarations
   }
 
   // Bodies.
@@ -301,6 +317,7 @@ void DoScalarDependentDefinitions(py::module m, T) {
     BindMultibodyElementMixin<T>(&cls);
     cls  // BR
         .def("name", &Class::name, cls_doc.name.doc)
+        .def("scoped_name", &Class::scoped_name, cls_doc.scoped_name.doc)
         .def("get_num_flexible_positions", &Class::get_num_flexible_positions,
             cls_doc.get_num_flexible_positions.doc)
         .def("get_num_flexible_velocities", &Class::get_num_flexible_velocities,
@@ -352,9 +369,6 @@ void DoScalarDependentDefinitions(py::module m, T) {
     auto cls = DefineTemplateClassWithDefault<Class, Body<T>>(
         m, "RigidBody", param, cls_doc.doc);
     cls  // BR
-        .def(py_init_deprecated<Class, const SpatialInertia<double>&>(
-                 cls_doc.ctor.doc_deprecated_1args),
-            py::arg("M_BBo_B"), cls_doc.ctor.doc_deprecated_1args)
         .def(py::init<const std::string&, const SpatialInertia<double>&>(),
             py::arg("body_name"), py::arg("M_BBo_B"), cls_doc.ctor.doc_2args)
         .def(py::init<const std::string&, ModelInstanceIndex,
@@ -546,6 +560,8 @@ void DoScalarDependentDefinitions(py::module m, T) {
         .def("translation_axis", &Class::translation_axis,
             cls_doc.translation_axis.doc)
         .def("damping", &Class::damping, cls_doc.damping.doc)
+        .def("set_default_damping", &Class::set_default_damping,
+            py::arg("damping"), cls_doc.set_default_damping.doc)
         .def("position_lower_limit", &Class::position_lower_limit,
             cls_doc.position_lower_limit.doc)
         .def("position_upper_limit", &Class::position_upper_limit,
@@ -660,6 +676,8 @@ void DoScalarDependentDefinitions(py::module m, T) {
             py::arg("damping") = 0.0, cls_doc.ctor.doc_7args)
         .def("revolute_axis", &Class::revolute_axis, cls_doc.revolute_axis.doc)
         .def("damping", &Class::damping, cls_doc.damping.doc)
+        .def("set_default_damping", &Class::set_default_damping,
+            py::arg("damping"), cls_doc.set_default_damping.doc)
         .def("position_lower_limit", &Class::position_lower_limit,
             cls_doc.position_lower_limit.doc)
         .def("position_upper_limit", &Class::position_upper_limit,
@@ -696,26 +714,11 @@ void DoScalarDependentDefinitions(py::module m, T) {
     auto cls = DefineTemplateClassWithDefault<Class, Joint<T>>(
         m, "ScrewJoint", param, cls_doc.doc);
     cls  // BR
-        .def(py::init([](const std::string& name,
-                          const Frame<T>& frame_on_parent,
-                          const Frame<T>& frame_on_child,
-                          std::optional<double> screw_pitch,
-                          std::optional<double> damping) {
-          if (!screw_pitch.has_value() || !damping.has_value()) {
-            WarnDeprecated(
-                "Defaults for the ScrewJoint constructor are deprecated.",
-                "2023-02-01");
-          }
-          return std::make_unique<Class>(name, frame_on_parent, frame_on_child,
-              screw_pitch.value_or(0.0), damping.value_or(0.0));
-        }),
+        .def(py::init<const string&, const Frame<T>&, const Frame<T>&, double,
+                 double>(),
             py::arg("name"), py::arg("frame_on_parent"),
-            py::arg("frame_on_child"), py::arg("screw_pitch") = py::none(),
-            py::arg("damping") = py::none(),
-            (std::string(cls_doc.ctor.doc_5args) +
-                "\n\nThe defaults values for screw_pitch and damping are "
-                "deprecated and will removed on 2023-02-01.")
-                .c_str())
+            py::arg("frame_on_child"), py::arg("screw_pitch"),
+            py::arg("damping"), cls_doc.ctor.doc_5args)
         .def(py::init<const string&, const Frame<T>&, const Frame<T>&,
                  const Vector3<double>&, double, double>(),
             py::arg("name"), py::arg("frame_on_parent"),
@@ -793,24 +796,6 @@ void DoScalarDependentDefinitions(py::module m, T) {
             py::arg("name"), py::arg("frame_on_parent_F"),
             py::arg("frame_on_child_M"), py::arg("X_FM"), cls_doc.ctor.doc)
         .def("X_FM", &Class::X_FM, cls_doc.X_FM.doc);
-
-    // Deprecated definitions
-    constexpr char kInitDeprecated[] =
-        "Deprecated:\n    WeldJoint frame notation has changed. Use "
-        "the constructor that uses `frame_on_parent_F`, "
-        "`frame_on_child_M`, and `X_FM`. The deprecated code will be "
-        "removed from Drake on or after 2022-12-01.";
-    cls.def(
-        py_init_deprecated<Class, const string&, const Frame<T>&,
-            const Frame<T>&, const RigidTransform<double>&>(kInitDeprecated),
-        py::arg("name"), py::arg("frame_on_parent_P"),
-        py::arg("frame_on_child_C"), py::arg("X_PC"), kInitDeprecated);
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    cls.def("X_PC", WrapDeprecated(cls_doc.X_PC.doc_deprecated, &Class::X_PC),
-        cls_doc.X_PC.doc_deprecated);
-#pragma GCC diagnostic pop
   }
 
   // Actuators.
@@ -1151,7 +1136,8 @@ void DoScalarDependentDefinitions(py::module m, T) {
             py::arg("L"), py::arg("b_E") = Vector3<T>::UnitZ().eval(),
             cls_doc.SolidCylinder.doc)
         .def_static("SolidCapsule", &Class::SolidCapsule, py::arg("r"),
-            py::arg("L"), cls_doc.SolidCapsule.doc)
+            py::arg("L"), py::arg("unit_vector") = Vector3<T>::UnitZ().eval(),
+            cls_doc.SolidCapsule.doc)
         .def_static("SolidCylinderAboutEnd", &Class::SolidCylinderAboutEnd,
             py::arg("r"), py::arg("L"), cls_doc.SolidCylinderAboutEnd.doc)
         .def_static("AxiallySymmetric", &Class::AxiallySymmetric, py::arg("J"),
@@ -1183,6 +1169,41 @@ void DoScalarDependentDefinitions(py::module m, T) {
         .def_static("MakeFromCentralInertia", &Class::MakeFromCentralInertia,
             py::arg("mass"), py::arg("p_PScm_E"), py::arg("I_SScm_E"),
             cls_doc.MakeFromCentralInertia.doc)
+        .def_static("SolidBoxWithDensity", &Class::SolidBoxWithDensity,
+            py::arg("density"), py::arg("lx"), py::arg("ly"), py::arg("lz"),
+            cls_doc.SolidBoxWithDensity.doc)
+        .def_static("SolidBoxWithMass", &Class::SolidBoxWithMass,
+            py::arg("mass"), py::arg("lx"), py::arg("ly"), py::arg("lz"),
+            cls_doc.SolidBoxWithMass.doc)
+        .def_static("SolidCubeWithDensity", &Class::SolidCubeWithDensity,
+            py::arg("density"), py::arg("length"),
+            cls_doc.SolidCubeWithDensity.doc)
+        .def_static("SolidCapsuleWithDensity", &Class::SolidCapsuleWithDensity,
+            py::arg("density"), py::arg("radius"), py::arg("length"),
+            py::arg("unit_vector"), cls_doc.SolidCapsuleWithDensity.doc)
+        .def_static("SolidCylinderWithDensity",
+            &Class::SolidCylinderWithDensity, py::arg("density"),
+            py::arg("radius"), py::arg("length"), py::arg("unit_vector"),
+            cls_doc.SolidCylinderWithDensity.doc)
+        .def_static("SolidCylinderWithDensityAboutEnd",
+            &Class::SolidCylinderWithDensityAboutEnd, py::arg("density"),
+            py::arg("radius"), py::arg("length"), py::arg("unit_vector"),
+            cls_doc.SolidCylinderWithDensityAboutEnd.doc)
+        .def_static("ThinRodWithMass", &Class::ThinRodWithMass, py::arg("mass"),
+            py::arg("length"), py::arg("unit_vector"),
+            cls_doc.ThinRodWithMass.doc)
+        .def_static("ThinRodWithMassAboutEnd", &Class::ThinRodWithMassAboutEnd,
+            py::arg("mass"), py::arg("length"), py::arg("unit_vector"),
+            cls_doc.ThinRodWithMassAboutEnd.doc)
+        .def_static("SolidEllipsoidWithDensity",
+            &Class::SolidEllipsoidWithDensity, py::arg("density"), py::arg("a"),
+            py::arg("b"), py::arg("c"), cls_doc.SolidEllipsoidWithDensity.doc)
+        .def_static("SolidSphereWithDensity", &Class::SolidSphereWithDensity,
+            py::arg("density"), py::arg("radius"),
+            cls_doc.SolidSphereWithDensity.doc)
+        .def_static("HollowSphereWithDensity", &Class::HollowSphereWithDensity,
+            py::arg("area_density"), py::arg("radius"),
+            cls_doc.HollowSphereWithDensity.doc)
         .def(py::init(), cls_doc.ctor.doc_0args)
         .def(py::init<const T&, const Eigen::Ref<const Vector3<T>>&,
                  const UnitInertia<T>&, const bool>(),
@@ -1236,6 +1257,8 @@ PYBIND11_MODULE(tree, m) {
   DoScalarIndependentDefinitions(m);
   type_visit([m](auto dummy) { DoScalarDependentDefinitions(m, dummy); },
       CommonScalarPack{});
+
+  ExecuteExtraPythonCode(m);
 }
 
 }  // namespace pydrake

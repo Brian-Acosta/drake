@@ -1,5 +1,3 @@
-# -*- python -*-
-
 load(
     "@drake//tools/skylark:drake_cc.bzl",
     "drake_cc_googletest",
@@ -117,6 +115,13 @@ drake_cc_googletest(
         ":generic_polynomial",
         "//common/test_utilities:expect_throws_message",
         "//common/test_utilities:symbolic_test_util",
+    ],
+)
+
+drake_cc_googletest(
+    name = "ostream_test",
+    deps = [
+        ":generic_polynomial",
     ],
 )
 

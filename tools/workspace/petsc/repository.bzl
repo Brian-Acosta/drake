@@ -1,5 +1,3 @@
-# -*- python -*-
-
 load("@drake//tools/workspace:github.bzl", "github_archive")
 
 def petsc_repository(
@@ -8,8 +6,8 @@ def petsc_repository(
     github_archive(
         name = name,
         repository = "petsc/petsc",
-        commit = "v3.18.2",
-        sha256 = "1237a1a2892011b14ca242e56295c03887705506615e43777c079e0a062f43a8",  # noqa
+        commit = "v3.18.5",
+        sha256 = "2c96efe5c7ad1dd9f0e4138e8c1b5622d5a3de48be0971968cd8318f9838657c",  # noqa
         build_file = ":package.BUILD.bazel",
         mirrors = mirrors,
         patches = [

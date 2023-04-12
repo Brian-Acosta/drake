@@ -171,7 +171,7 @@ TEST_F(CameraConfigFunctionsTest, InvalidParentBaseFrame) {
   config.X_PB.base_frame = "invalid_frame";
   DRAKE_EXPECT_THROWS_MESSAGE(
       ApplyCameraConfig(config, &builder_),
-      "Could not find frame.+");
+      ".*invalid_frame.*");
 }
 
 /* Confirms that render engine is handled correctly.
@@ -413,6 +413,11 @@ TEST_F(CameraConfigFunctionsTest, RenderEngineRequest) {
                 vtk_config.renderer_name)),
             "RenderEngineVtk");
 
+  // Specifying the same config again should not produce a new render engine.
+  int current_renderer_count = scene_graph_->RendererCount();
+  ApplyCameraConfig(vtk_config, &builder_);
+  EXPECT_EQ(current_renderer_count, scene_graph_->RendererCount());
+
   // Using an existing name but the wrong render engine type throws.
   DRAKE_EXPECT_THROWS_MESSAGE(
       ApplyCameraConfig(
@@ -425,15 +430,15 @@ TEST_F(CameraConfigFunctionsTest, RenderEngineRequest) {
   // ApplyCameraConfig doesn't throw, and the renderer count doesn't change.
   // This test assumes that this behavior doesn't depend on the type of the
   // RenderEngine.
-  const int renderer_count = scene_graph_->RendererCount();
+  current_renderer_count = scene_graph_->RendererCount();
   ApplyCameraConfig(CameraConfig{.renderer_name = "vtk_renderer"}, &builder_);
-  EXPECT_EQ(renderer_count, scene_graph_->RendererCount());
+  EXPECT_EQ(current_renderer_count, scene_graph_->RendererCount());
 
   // Now explicitly request a new RenderEngineGl -- whether it throws depends
   // on whether GL is available.
   const CameraConfig gl_config{.renderer_name = "gl_renderer",
                                .renderer_class = "RenderEngineGl"};
-  if (geometry::render::kHasRenderEngineGl) {
+  if (geometry::kHasRenderEngineGl) {
     ASSERT_FALSE(scene_graph_->HasRenderer(gl_config.renderer_name));
     ApplyCameraConfig(gl_config, &builder_);
     ASSERT_EQ(NiceTypeName::RemoveNamespaces(
@@ -445,26 +450,6 @@ TEST_F(CameraConfigFunctionsTest, RenderEngineRequest) {
         ".*'RenderEngineGl' is not supported.*");
   }
 }
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-TEST_F(CameraConfigFunctionsTest, DeprecatedOverload) {
-  CameraConfig config;
-  config.name = "test_camera";
-
-  DrakeLcm expected_lcm;
-  const size_t previous_count = builder_.GetSystems().size();
-  ApplyCameraConfig(config, plant_, &builder_, scene_graph_, &expected_lcm);
-  EXPECT_GT(builder_.GetSystems().size(), previous_count);
-
-  const auto* publisher = GetSystem<LcmPublisherSystem>(
-      builder_, "LcmPublisherSystem(DRAKE_RGBD_CAMERA_IMAGES_test_camera)");
-  ASSERT_NE(publisher, nullptr);
-  const DrakeLcmInterface& actual_lcm =
-      const_cast<LcmPublisherSystem*>(publisher)->lcm();
-  EXPECT_TRUE(&actual_lcm == &expected_lcm);
-}
-#pragma GCC diagnostic pop
 
 }  // namespace
 }  // namespace sensors

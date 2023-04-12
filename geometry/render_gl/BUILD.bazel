@@ -1,5 +1,3 @@
-# -*- python -*-
-
 load(
     "@drake//tools/skylark:drake_cc.bzl",
     "drake_cc_googletest",
@@ -229,6 +227,7 @@ drake_cc_googletest_ubuntu_only(
         "//common/test_utilities:expect_throws_message",
         "//geometry/render:render_label",
         "//systems/sensors:color_palette",
+        "@vtk//:vtkIOImage",
     ],
 )
 
@@ -240,6 +239,21 @@ drake_cc_googletest(
     }),
     deps = [
         ":factory",
+        "//common/test_utilities:expect_throws_message",
+    ],
+)
+
+# TODO(zachfang): Remove this along with deprecation on 2023-07-01.
+drake_cc_googletest(
+    name = "deprecation_test",
+    copts = [
+        "-Wno-cpp",
+        "-Wno-deprecated-declarations",
+    ],
+    tags = vtk_test_tags(),
+    deps = [
+        ":factory",
+        ":render_engine_gl_params",
         "//common/test_utilities:expect_throws_message",
     ],
 )

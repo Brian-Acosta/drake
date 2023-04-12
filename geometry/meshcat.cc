@@ -20,12 +20,14 @@
 
 #include <App.h>
 #include <common_robotics_utilities/base64_helpers.hpp>
+#include <drake_vendor/msgpack.hpp>
+#include <drake_vendor/uuid.h>
 #include <fmt/format.h>
-#include <msgpack.hpp>
-#include <uuid.h>
 
+#include "drake/common/drake_export.h"
 #include "drake/common/drake_throw.h"
 #include "drake/common/find_resource.h"
+#include "drake/common/network_policy.h"
 #include "drake/common/never_destroyed.h"
 #include "drake/common/scope_exit.h"
 #include "drake/common/text_logging.h"
@@ -340,7 +342,7 @@ class MeshcatShapeReifier : public ShapeReifier {
         //  - "[^\s]+" matches the filename, and
         //  - "[$\r\n]" matches the end of string or end of line.
         // TODO(russt): This parsing could still be more robust.
-        std::regex map_regex(R"""(map_.+\s([^\s]+)[$\r\n])""");
+        std::regex map_regex(R"""(map_.+\s([^\s]+)\s*[$\r\n])""");
         for (std::sregex_iterator iter(meshfile_object.mtl_library.begin(),
                                        meshfile_object.mtl_library.end(),
                                        map_regex);
@@ -361,16 +363,16 @@ class MeshcatShapeReifier : public ShapeReifier {
                               map_data));
           } else {
             drake::log()->warn(
-                "Meshcat: Failed to load texture. {} references {}, but "
-                "Meshcat could not open filename {}",
-                basedir / mtllib, map, basedir / map);
+                "Meshcat: Failed to load texture. \"{}\" references {}, but "
+                "Meshcat could not open filename \"{}\"",
+                (basedir / mtllib).string(), map, (basedir / map).string());
           }
         }
       } else {
         drake::log()->warn(
             "Meshcat: Failed to load texture. {} references {}, but Meshcat "
-            "could not open filename {}",
-            mesh.filename(), mtllib, basedir / mtllib);
+            "could not open filename \"{}\"",
+            mesh.filename(), mtllib, (basedir / mtllib).string());
       }
       Eigen::Map<Eigen::Matrix4d> matrix(meshfile_object.matrix);
       matrix(0, 0) = mesh.scale();
@@ -545,6 +547,11 @@ class Meshcat::Impl {
         main_thread_id_(std::this_thread::get_id()),
         params_(params) {
     DRAKE_THROW_UNLESS(params.port.value_or(7000) >= 1024);
+    if (!drake::internal::IsNetworkingAllowed("meshcat")) {
+      throw std::runtime_error(
+          "Meshcat has been disabled via the DRAKE_ALLOW_NETWORK environment "
+          "variable");
+    }
 
     // Sanity-check the pattern, by passing it (along with dummy host and port
     // values) through to fmt to allow any fmt-specific exception to percolate.
@@ -742,7 +749,7 @@ class Meshcat::Impl {
       material->color = ToMeshcatColor(rgba);
       // TODO(russt): Most values are taken verbatim from meshcat-python.
       material->reflectivity = 0.5;
-      material->side = internal::kDoubleSide;
+      material->side = SideOfFaceToRender::kDoubleSide;
       // From meshcat-python: Three.js allows a material to have an opacity
       // which is != 1, but to still be non - transparent, in which case the
       // opacity only serves to desaturate the material's color. That's a
@@ -822,7 +829,7 @@ class Meshcat::Impl {
   // This function is public via the PIMPL.
   void SetObject(std::string_view path, const TriangleSurfaceMesh<double>& mesh,
                  const Rgba& rgba, bool wireframe,
-                 double wireframe_line_width) {
+                 double wireframe_line_width, SideOfFaceToRender side) {
     DRAKE_DEMAND(IsThread(main_thread_id_));
     Eigen::Matrix3Xd vertices(3, mesh.num_vertices());
     for (int i = 0; i < mesh.num_vertices(); ++i) {
@@ -836,7 +843,7 @@ class Meshcat::Impl {
       }
     }
     SetTriangleMesh(path, vertices, faces, rgba, wireframe,
-                    wireframe_line_width);
+                    wireframe_line_width, side);
   }
 
   // This function is public via the PIMPL.
@@ -908,7 +915,7 @@ class Meshcat::Impl {
                        const Eigen::Ref<const Eigen::Matrix3Xd>& vertices,
                        const Eigen::Ref<const Eigen::Matrix3Xi>& faces,
                        const Rgba& rgba, bool wireframe,
-                       double wireframe_line_width) {
+                       double wireframe_line_width, SideOfFaceToRender side) {
     DRAKE_DEMAND(IsThread(main_thread_id_));
 
     uuids::uuid_random_generator uuid_generator{generator_};
@@ -930,6 +937,7 @@ class Meshcat::Impl {
     material->wireframe = wireframe;
     material->wireframeLineWidth = wireframe_line_width;
     material->vertexColors = false;
+    material->side = side;
     data.object.material = std::move(material);
 
     internal::MeshData mesh;
@@ -955,7 +963,7 @@ class Meshcat::Impl {
                        const Eigen::Ref<const Eigen::Matrix3Xi>& faces,
                        const Eigen::Ref<const Eigen::Matrix3Xd>& colors,
                        bool wireframe,
-                       double wireframe_line_width) {
+                       double wireframe_line_width, SideOfFaceToRender side) {
     DRAKE_DEMAND(IsThread(main_thread_id_));
 
     uuids::uuid_random_generator uuid_generator{generator_};
@@ -977,7 +985,7 @@ class Meshcat::Impl {
     material->wireframe = wireframe;
     material->wireframeLineWidth = wireframe_line_width;
     material->vertexColors = true;
-    material->side = internal::kDoubleSide;
+    material->side = side;
     data.object.material = std::move(material);
 
     internal::MeshData mesh;
@@ -1089,7 +1097,7 @@ class Meshcat::Impl {
   }
 
   // This function is public via the PIMPL.
-  void SetAnimation(const MeshcatAnimation& animation) {
+  DRAKE_NO_EXPORT void SetAnimation(const MeshcatAnimation& animation) {
     DRAKE_DEMAND(IsThread(main_thread_id_));
 
     std::stringstream message_stream;
@@ -1392,6 +1400,18 @@ class Meshcat::Impl {
           fmt::format("Meshcat does not have any slider named {}.", name));
     }
     return iter->second.value;
+  }
+
+  std::vector<std::string> GetSliderNames() const {
+    DRAKE_DEMAND(IsThread(main_thread_id_));
+
+    std::lock_guard<std::mutex> lock(controls_mutex_);
+    std::vector<std::string> names;
+    names.reserve(sliders_.size());
+    for (const auto& [name, _] : sliders_) {
+      names.push_back(name);
+    }
+    return names;
   }
 
   // This function is public via the PIMPL.
@@ -1793,7 +1813,7 @@ class Meshcat::Impl {
       // Quietly ignore messages that don't match our expected message type.
       // This violates the style guide, but msgpack does not provide any other
       // mechanism for checking the message type.
-      drake::log()->debug("Meshcat ignored an unparseable message");
+      drake::log()->debug("Meshcat ignored an unparsable message");
       return;
     }
     std::lock_guard<std::mutex> lock(controls_mutex_);
@@ -2073,8 +2093,8 @@ void Meshcat::SetObject(std::string_view path,
 void Meshcat::SetObject(std::string_view path,
                         const TriangleSurfaceMesh<double>& mesh,
                         const Rgba& rgba, bool wireframe,
-                        double wireframe_line_width) {
-  impl().SetObject(path, mesh, rgba, wireframe, wireframe_line_width);
+                        double wireframe_line_width, SideOfFaceToRender side) {
+  impl().SetObject(path, mesh, rgba, wireframe, wireframe_line_width, side);
 }
 
 void Meshcat::SetLine(std::string_view path,
@@ -2093,18 +2113,82 @@ void Meshcat::SetLineSegments(std::string_view path,
 void Meshcat::SetTriangleMesh(
     std::string_view path, const Eigen::Ref<const Eigen::Matrix3Xd>& vertices,
     const Eigen::Ref<const Eigen::Matrix3Xi>& faces, const Rgba& rgba,
-    bool wireframe, double wireframe_line_width) {
+    bool wireframe, double wireframe_line_width, SideOfFaceToRender side) {
   impl().SetTriangleMesh(path, vertices, faces, rgba, wireframe,
-                              wireframe_line_width);
+                              wireframe_line_width, side);
 }
 
 void Meshcat::SetTriangleColorMesh(
     std::string_view path, const Eigen::Ref<const Eigen::Matrix3Xd>& vertices,
     const Eigen::Ref<const Eigen::Matrix3Xi>& faces,
     const Eigen::Ref<const Eigen::Matrix3Xd>& colors, bool wireframe,
-    double wireframe_line_width) {
+    double wireframe_line_width, SideOfFaceToRender side) {
   impl().SetTriangleColorMesh(path, vertices, faces, colors, wireframe,
-                         wireframe_line_width);
+                         wireframe_line_width, side);
+}
+
+void Meshcat::PlotSurface(std::string_view path,
+                          const Eigen::Ref<const Eigen::MatrixXd>& X,
+                          const Eigen::Ref<const Eigen::MatrixXd>& Y,
+                          const Eigen::Ref<const Eigen::MatrixXd>& Z,
+                          const Rgba& rgba, bool wireframe,
+                          double wireframe_line_width) {
+  DRAKE_DEMAND(Y.rows() == X.rows() && Y.cols() == X.cols());
+  DRAKE_DEMAND(Z.rows() == X.rows() && Z.cols() == X.cols());
+  const int rows = X.rows(), cols = X.cols();
+
+  if (wireframe) {
+    int count = -1;
+    Eigen::Matrix3Xd vertices(3, rows * cols * 2);
+    // Sweep back and forth along rows.
+    for (int r = 0; r < rows; ++r) {
+      const int c0 = (r & 0x1) ? cols - 1 : 0;
+      const int c_delta = (r & 0x1) ? -1 : 1;
+      for (int j = 0, c = c0; j < cols; ++j, c += c_delta) {
+        vertices.col(++count) << X(r, c), Y(r, c), Z(r, c);
+      }
+    }
+    // Sweep back and forth along columns.
+    const int c0 = (rows & 0x1) ? cols - 1 : 0;
+    const int c_delta = (rows & 0x1) ? -1 : 1;
+    for (int j = 0, c = c0; j < cols; ++j, c += c_delta) {
+      const int r0 = (j & 0x1) ? 0 : rows - 1;
+      const int r_delta = (j & 0x1) ? 1 : -1;
+      for (int i = 0, r = r0; i < rows; ++i, r += r_delta) {
+        vertices.col(++count) << X(r, c), Y(r, c), Z(r, c);
+      }
+    }
+
+    impl().SetLine(path, vertices, wireframe_line_width, rgba);
+  } else {
+    using MapRowVector = const Eigen::Map<const Eigen::RowVectorXd>;
+
+    Eigen::Matrix3Xd vertices(3, rows * cols);
+    vertices.row(0) = MapRowVector(X.data(), rows * cols);
+    vertices.row(1) = MapRowVector(Y.data(), rows * cols);
+    vertices.row(2) = MapRowVector(Z.data(), rows * cols);
+
+    // Make a regular grid as in https://stackoverflow.com/q/44934631.
+    const int num_boxes = (rows - 1) * (cols - 1);
+    Eigen::Matrix3Xi faces(3, 2 * num_boxes);
+    Eigen::MatrixXi ids(rows, cols);
+    // Populate ids with [0, 1, ..., num vertices-1]
+    std::iota(ids.data(), ids.data() + rows * cols, 0);
+
+    int count = 0;
+    for (int i = 0; i < rows - 1; ++i) {
+      for (int j = 0; j < cols - 1; ++j) {
+        // Upper left triangles.
+        faces.col(count++) << ids(i, j), ids(i + 1, j), ids(i, j + 1);
+        // Lower right triangles.
+        faces.col(count++) << ids(i + 1, j), ids(i + 1, j + 1), ids(i, j + 1);
+      }
+    }
+
+    impl().SetTriangleMesh(path, vertices, faces, rgba, wireframe,
+                           wireframe_line_width,
+                           SideOfFaceToRender::kDoubleSide);
+  }
 }
 
 void Meshcat::SetCamera(PerspectiveCamera camera, std::string path) {
@@ -2116,8 +2200,15 @@ void Meshcat::SetCamera(OrthographicCamera camera, std::string path) {
 }
 
 void Meshcat::SetTransform(std::string_view path,
-                           const RigidTransformd& X_ParentPath) {
-  impl().SetTransform(path, X_ParentPath);
+                           const RigidTransformd& X_ParentPath,
+                           const std::optional<double>& time) {
+  if (recording_ && time) {
+    animation_->SetTransform(animation_->frame(*time), std::string(path),
+                             X_ParentPath);
+  }
+  if (!recording_ || !time || set_visualizations_while_recording_) {
+    impl().SetTransform(path, X_ParentPath);
+  }
 }
 
 void Meshcat::SetTransform(std::string_view path,
@@ -2134,18 +2225,37 @@ void Meshcat::SetRealtimeRate(double rate) {
 }
 
 void Meshcat::SetProperty(std::string_view path, std::string property,
-                          bool value) {
-  impl().SetProperty(path, std::move(property), value);
+                          bool value, const std::optional<double>& time) {
+  if (recording_ && time) {
+    animation_->SetProperty(animation_->frame(*time), std::string(path),
+                            property, value);
+  }
+  if (!recording_ || !time || set_visualizations_while_recording_) {
+    impl().SetProperty(path, std::move(property), value);
+  }
 }
 
 void Meshcat::SetProperty(std::string_view path, std::string property,
-                          double value) {
-  impl().SetProperty(path, std::move(property), value);
+                          double value, const std::optional<double>& time) {
+  if (recording_ && time) {
+    animation_->SetProperty(animation_->frame(*time), std::string(path),
+                            property, value);
+  }
+  if (!recording_ || set_visualizations_while_recording_) {
+    impl().SetProperty(path, std::move(property), value);
+  }
 }
 
 void Meshcat::SetProperty(std::string_view path, std::string property,
-                          const std::vector<double>& value) {
-  impl().SetProperty(path, std::move(property), value);
+                          const std::vector<double>& value,
+                          const std::optional<double>& time) {
+  if (recording_ && time) {
+    animation_->SetProperty(animation_->frame(*time), std::string(path),
+                            property, value);
+  }
+  if (!recording_ || set_visualizations_while_recording_) {
+    impl().SetProperty(path, std::move(property), value);
+  }
 }
 
 void Meshcat::SetAnimation(const MeshcatAnimation& animation) {
@@ -2188,6 +2298,10 @@ double Meshcat::GetSliderValue(std::string_view name) const {
   return impl().GetSliderValue(name);
 }
 
+std::vector<std::string> Meshcat::GetSliderNames() const {
+  return impl().GetSliderNames();
+}
+
 void Meshcat::DeleteSlider(std::string name) {
   impl().DeleteSlider(std::move(name));
 }
@@ -2202,6 +2316,34 @@ Meshcat::Gamepad Meshcat::GetGamepad() const {
 
 std::string Meshcat::StaticHtml() {
   return impl().StaticHtml();
+}
+
+void Meshcat::StartRecording(double frames_per_second,
+                             bool set_visualizations_while_recording) {
+  animation_ = std::make_unique<MeshcatAnimation>(frames_per_second);
+  recording_ = true;
+  set_visualizations_while_recording_ = set_visualizations_while_recording;
+}
+
+void Meshcat::PublishRecording() {
+  impl().SetAnimation(*animation_);
+}
+
+void Meshcat::DeleteRecording() {
+  if (animation_) {
+    // Reset the recording.
+    double frames_per_second = animation_->frames_per_second();
+    animation_ = std::make_unique<MeshcatAnimation>(frames_per_second);
+  }
+}
+
+MeshcatAnimation& Meshcat::get_mutable_recording() {
+  if (!animation_) {
+    throw std::runtime_error(
+        "You must create a recording (via StartRecording) before calling "
+        "get_mutable_recording");
+  }
+  return *animation_;
 }
 
 bool Meshcat::HasPath(std::string_view path) const {

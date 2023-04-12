@@ -1,5 +1,3 @@
-# -*- python -*-
-
 load(
     "@drake//tools/skylark:drake_cc.bzl",
     "drake_cc_googletest",
@@ -120,6 +118,7 @@ drake_cc_googletest(
         "//common/test_utilities",
         "//geometry/test_utilities:dummy_render_engine",
         "//math:geometric_transform",
+        "@vtk//:vtkIOImage",
     ],
 )
 

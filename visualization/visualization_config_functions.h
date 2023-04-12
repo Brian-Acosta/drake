@@ -7,6 +7,7 @@
 #include "drake/geometry/meshcat.h"
 #include "drake/geometry/meshcat_visualizer_params.h"
 #include "drake/geometry/scene_graph.h"
+#include "drake/multibody/meshcat/contact_visualizer_params.h"
 #include "drake/multibody/plant/multibody_plant.h"
 #include "drake/systems/framework/diagram_builder.h"
 #include "drake/systems/lcm/lcm_buses.h"
@@ -91,16 +92,19 @@ or else the provided `scene_graph` is non-null.
 @see drake::multibody::AddMultibodyPlant()
 @see drake::systems::lcm::ApplyLcmBusConfig() */
 void ApplyVisualizationConfig(
-    const VisualizationConfig& config,
-    systems::DiagramBuilder<double>* builder,
+    const VisualizationConfig& config, systems::DiagramBuilder<double>* builder,
     const systems::lcm::LcmBuses* lcm_buses = nullptr,
     const multibody::MultibodyPlant<double>* plant = nullptr,
     const geometry::SceneGraph<double>* scene_graph = nullptr,
     std::shared_ptr<geometry::Meshcat> meshcat = nullptr,
     lcm::DrakeLcmInterface* lcm = nullptr);
 
-/** Adds LCM visualization publishers to communicate to drake_visualizer
-and/or meldis, using all of the default configuration settings.
+/** Adds LCM visualization publishers to communicate to Meshcat,
+drake_visualizer and/or meldis, using all of the default configuration
+settings.
+
+@param meshcat An optional existing Meshcat instance. (If nullptr, then a
+meshcat instance will be created.)
 
 <dl><dt>Example</dt><dd>
 @code
@@ -130,17 +134,23 @@ Simulator<double> simulator(builder.Build());
 
 @see drake::visualization::ApplyVisualizationConfig()
 @see drake::multibody::AddMultibodyPlant() */
-void AddDefaultVisualization(systems::DiagramBuilder<double>* builder);
+void AddDefaultVisualization(
+    systems::DiagramBuilder<double>* builder,
+    std::shared_ptr<geometry::Meshcat> meshcat = nullptr);
 
 namespace internal {
 
-// (For unit testing only.)
+// (This function is declared in the header so that unit tests can call it.)
 std::vector<geometry::DrakeVisualizerParams>
 ConvertVisualizationConfigToDrakeParams(const VisualizationConfig&);
 
-// (For unit testing only.)
+// (This function is declared in the header so that unit tests can call it.)
 std::vector<geometry::MeshcatVisualizerParams>
 ConvertVisualizationConfigToMeshcatParams(const VisualizationConfig&);
+
+// (This function is declared in the header so that unit tests can call it.)
+multibody::meshcat::ContactVisualizerParams
+ConvertVisualizationConfigToMeshcatContactParams(const VisualizationConfig&);
 
 }  // namespace internal
 }  // namespace visualization

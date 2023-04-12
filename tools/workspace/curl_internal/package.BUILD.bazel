@@ -1,4 +1,4 @@
-# -*- python -*-
+# -*- bazel -*-
 
 load(
     "@drake//tools/workspace:cmake_configure_file.bzl",
@@ -29,6 +29,7 @@ _HDRS = glob([
     "include/curl/*.h",
     "lib/*.h",
     "lib/vauth/*.h",
+    "lib/vquic/*.h",
     "lib/vssh/*.h",
     "lib/vtls/*.h",
 ])
@@ -44,12 +45,16 @@ _INCLUDES = [
 _SRCS = [
     "lib/altsvc.c",
     "lib/base64.c",
+    "lib/cf-http.c",
+    "lib/cf-socket.c",
+    "lib/cfilters.c",
     "lib/conncache.c",
     "lib/connect.c",
     "lib/content_encoding.c",
     "lib/cookie.c",
     "lib/curl_addrinfo.c",
     "lib/curl_get_line.c",
+    "lib/curl_log.c",
     "lib/curl_memrchr.c",
     "lib/doh.c",
     "lib/dynbuf.c",
@@ -73,6 +78,7 @@ _SRCS = [
     "lib/http_digest.c",
     "lib/http_negotiate.c",
     "lib/http_proxy.c",
+    "lib/idn.c",
     "lib/if2ip.c",
     "lib/inet_ntop.c",
     "lib/inet_pton.c",
@@ -111,6 +117,7 @@ _SRCS = [
     "lib/urlapi.c",
     "lib/vauth/digest.c",
     "lib/vauth/vauth.c",
+    "lib/vquic/vquic.c",
     "lib/vtls/vtls.c",
     "lib/warnless.c",
 ]
@@ -133,10 +140,8 @@ _COPTS = [
 # The link flags for the library.
 _LINKOPTS = select({
     "@drake//tools/cc_toolchain:apple": [
-        "-Wl,-framework",
-        "-Wl,CoreFoundation",
-        "-Wl,-framework",
-        "-Wl,SystemConfiguration",
+        "-Wl,-framework,CoreFoundation",
+        "-Wl,-framework,SystemConfiguration",
     ],
     "//conditions:default": [],
 })

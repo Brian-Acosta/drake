@@ -249,8 +249,9 @@ TEST_P(TestEllipsoidsSeparation, TestSOCP) {
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(GurobiTest, TestEllipsoidsSeparation,
-                        ::testing::ValuesIn(GetEllipsoidsSeparationProblems()));
+INSTANTIATE_TEST_SUITE_P(
+    GurobiTest, TestEllipsoidsSeparation,
+    ::testing::ValuesIn(GetEllipsoidsSeparationProblems()));
 
 TEST_P(TestQPasSOCP, TestSOCP) {
   GurobiSolver gurobi_solver;
@@ -260,7 +261,7 @@ TEST_P(TestQPasSOCP, TestSOCP) {
 }
 
 INSTANTIATE_TEST_SUITE_P(GurobiTest, TestQPasSOCP,
-                        ::testing::ValuesIn(GetQPasSOCPProblems()));
+                         ::testing::ValuesIn(GetQPasSOCPProblems()));
 
 TEST_P(TestFindSpringEquilibrium, TestSOCP) {
   GurobiSolver gurobi_solver;
@@ -302,6 +303,11 @@ GTEST_TEST(TestSOCP, SmallestEllipsoidCoveringProblem) {
 GTEST_TEST(TestSOCP, TestSocpDuplicatedVariable1) {
   GurobiSolver solver;
   TestSocpDuplicatedVariable1(solver, std::nullopt, 1E-6);
+}
+
+GTEST_TEST(TestSOCP, TestSocpDuplicatedVariable2) {
+  GurobiSolver solver;
+  TestSocpDuplicatedVariable2(solver, std::nullopt, 1E-6);
 }
 
 GTEST_TEST(GurobiTest, MultipleThreadsSharingEnvironment) {
@@ -383,7 +389,7 @@ GTEST_TEST(GurobiTest, GurobiErrorCode) {
     DRAKE_EXPECT_THROWS_MESSAGE(solver.Solve(prog, {}, solver_options1),
                                 ".* 'Foo' is an unknown parameter in Gurobi.*");
 
-    // Report error when we pass an incorect value to a valid Gurobi parameter
+    // Report error when we pass an incorrect value to a valid Gurobi parameter
     SolverOptions solver_options2;
     solver_options2.SetOption(solver.solver_id(), "FeasibilityTol", 1E10);
     DRAKE_EXPECT_THROWS_MESSAGE(solver.Solve(prog, {}, solver_options2),
@@ -654,7 +660,7 @@ GTEST_TEST(GurobiTest, SOCPDualSolution2) {
     SolverOptions options;
     options.SetOption(GurobiSolver::id(), "QCPDual", 1);
     const auto result = solver.Solve(prog, {}, options);
-    // By pertubing the constraint1 as x^2 <= 2x + 3 + eps, the optimal cost
+    // By perturbing the constraint1 as x^2 <= 2x + 3 + eps, the optimal cost
     // becomes -1 - sqrt(4+eps). The gradient of the cost w.r.t eps is -1/4.
     EXPECT_TRUE(CompareMatrices(result.GetDualSolution(constraint1),
                                 Vector1d(-1.0 / 4), 1e-8));
@@ -662,6 +668,13 @@ GTEST_TEST(GurobiTest, SOCPDualSolution2) {
     // price is 0.
     EXPECT_TRUE(CompareMatrices(result.GetDualSolution(constraint2),
                                 Vector1d(0), 1e-8));
+  }
+}
+
+GTEST_TEST(GurobiTest, TestDegenerateSOCP) {
+  GurobiSolver solver;
+  if (solver.is_available()) {
+    TestDegenerateSOCP(solver);
   }
 }
 
