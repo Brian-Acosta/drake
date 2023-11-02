@@ -12,11 +12,12 @@ namespace {
 
 using yaml::LoadYamlString;
 
-GTEST_TEST(MultibodyPlantConfigFunctionsTest, BasicTest) {
+GTEST_TEST(MultibodyPlantConfigFunctionsTest, AddMultibodyBasicTest) {
   MultibodyPlantConfig config;
   config.time_step = 0.002;
   config.penetration_allowance = 0.003;
   config.stiction_tolerance = 0.004;
+  config.sap_near_rigid_threshold = 0.1;
   config.contact_model = "hydroelastic";
   config.contact_surface_representation = "polygon";
   config.adjacent_bodies_collision_filters = false;
@@ -24,11 +25,34 @@ GTEST_TEST(MultibodyPlantConfigFunctionsTest, BasicTest) {
   drake::systems::DiagramBuilder<double> builder;
   auto result = AddMultibodyPlant(config, &builder);
   EXPECT_EQ(result.plant.time_step(), 0.002);
-  EXPECT_EQ(result.plant.get_contact_model(),
-            ContactModel::kHydroelasticsOnly);
+  EXPECT_EQ(result.plant.get_sap_near_rigid_threshold(), 0.1);
+  EXPECT_EQ(result.plant.get_contact_model(), ContactModel::kHydroelasticsOnly);
   EXPECT_EQ(result.plant.get_contact_surface_representation(),
             geometry::HydroelasticContactRepresentation::kPolygon);
   EXPECT_EQ(result.plant.get_adjacent_bodies_collision_filters(), false);
+  // There is no getter for penetration_allowance nor stiction_tolerance, so we
+  // can't test them.
+}
+
+GTEST_TEST(MultibodyPlantConfigFunctionsTest,
+           ApplyMultibodyPlantConfigBasicTest) {
+  MultibodyPlantConfig config;
+  config.time_step = 0.002;
+  config.penetration_allowance = 0.003;
+  config.stiction_tolerance = 0.004;
+  config.sap_near_rigid_threshold = 0.1;
+  config.contact_model = "hydroelastic";
+  config.contact_surface_representation = "polygon";
+  config.adjacent_bodies_collision_filters = false;
+
+  MultibodyPlant<double> plant(config.time_step);
+  ApplyMultibodyPlantConfig(config, &plant);
+  // The time_step is not set.
+  EXPECT_EQ(plant.get_sap_near_rigid_threshold(), 0.1);
+  EXPECT_EQ(plant.get_contact_model(), ContactModel::kHydroelasticsOnly);
+  EXPECT_EQ(plant.get_contact_surface_representation(),
+            geometry::HydroelasticContactRepresentation::kPolygon);
+  EXPECT_EQ(plant.get_adjacent_bodies_collision_filters(), false);
   // There is no getter for penetration_allowance nor stiction_tolerance, so we
   // can't test them.
 }
@@ -39,6 +63,7 @@ penetration_allowance: 0.003
 stiction_tolerance: 0.004
 contact_model: hydroelastic
 discrete_contact_solver: sap
+sap_near_rigid_threshold: 0.01
 contact_surface_representation: triangle
 adjacent_bodies_collision_filters: false
 )""";
@@ -48,12 +73,12 @@ GTEST_TEST(MultibodyPlantConfigFunctionsTest, YamlTest) {
   drake::systems::DiagramBuilder<double> builder;
   auto result = AddMultibodyPlant(config, &builder);
   EXPECT_EQ(result.plant.time_step(), 0.002);
-  EXPECT_EQ(result.plant.get_contact_model(),
-            ContactModel::kHydroelasticsOnly);
+  EXPECT_EQ(result.plant.get_contact_model(), ContactModel::kHydroelasticsOnly);
   EXPECT_EQ(result.plant.get_contact_surface_representation(),
             geometry::HydroelasticContactRepresentation::kTriangle);
   EXPECT_EQ(result.plant.get_discrete_contact_solver(),
             DiscreteContactSolver::kSap);
+  EXPECT_EQ(result.plant.get_sap_near_rigid_threshold(), 0.01);
   EXPECT_EQ(result.plant.get_adjacent_bodies_collision_filters(), false);
   // There is no getter for penetration_allowance nor stiction_tolerance, so we
   // can't test them.
@@ -61,10 +86,10 @@ GTEST_TEST(MultibodyPlantConfigFunctionsTest, YamlTest) {
 
 GTEST_TEST(MultibodyPlantConfigFunctionsTest, ContactModelTest) {
   std::vector<std::pair<const char*, ContactModel>> known_values{
-    std::pair("point", ContactModel::kPointContactOnly),
-    std::pair("hydroelastic", ContactModel::kHydroelasticsOnly),
-    std::pair("hydroelastic_with_fallback",
-        ContactModel::kHydroelasticWithFallback),
+      std::pair("point", ContactModel::kPointContactOnly),
+      std::pair("hydroelastic", ContactModel::kHydroelasticsOnly),
+      std::pair("hydroelastic_with_fallback",
+                ContactModel::kHydroelasticWithFallback),
   };
 
   for (const auto& [name, value] : known_values) {
@@ -79,8 +104,8 @@ GTEST_TEST(MultibodyPlantConfigFunctionsTest, ContactModelTest) {
 GTEST_TEST(MultibodyPlantConfigFunctionsTest, ContactRepresentationTest) {
   using ContactRep = geometry::HydroelasticContactRepresentation;
   std::vector<std::pair<const char*, ContactRep>> known_values{
-    std::pair("triangle", ContactRep::kTriangle),
-    std::pair("polygon", ContactRep::kPolygon),
+      std::pair("triangle", ContactRep::kTriangle),
+      std::pair("polygon", ContactRep::kPolygon),
   };
 
   for (const auto& [name, value] : known_values) {

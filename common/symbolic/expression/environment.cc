@@ -19,22 +19,12 @@ namespace symbolic {
 
 using std::endl;
 using std::initializer_list;
-using std::move;
 using std::ostream;
 using std::ostringstream;
 using std::runtime_error;
 using std::string;
 
 namespace {
-void throw_if_dummy(const Variable& var) {
-  if (var.is_dummy()) {
-    ostringstream oss;
-    oss << "Dummy variable (ID = 0) is detected"
-        << "in the initialization of an environment.";
-    throw runtime_error(oss.str());
-  }
-}
-
 void throw_if_nan(const double v) {
   if (std::isnan(v)) {
     ostringstream oss;
@@ -53,7 +43,7 @@ Environment::map BuildMap(const initializer_list<Environment::key_type> vars) {
   return m;
 }
 
-}  // anonymous namespace
+}  // namespace
 
 Environment::Environment(const std::initializer_list<value_type> init)
     : Environment{map(init)} {}
@@ -61,15 +51,13 @@ Environment::Environment(const std::initializer_list<value_type> init)
 Environment::Environment(const std::initializer_list<key_type> vars)
     : Environment{BuildMap(vars)} {}
 
-Environment::Environment(map m) : map_{move(m)} {
+Environment::Environment(map m) : map_{std::move(m)} {
   for (const auto& p : map_) {
-    throw_if_dummy(p.first);
     throw_if_nan(p.second);
   }
 }
 
 void Environment::insert(const key_type& key, const mapped_type& elem) {
-  throw_if_dummy(key);
   throw_if_nan(elem);
   map_.emplace(key, elem);
 }
@@ -106,21 +94,11 @@ string Environment::to_string() const {
 }
 
 Environment::mapped_type& Environment::operator[](const key_type& key) {
-  if (key.is_dummy()) {
-    ostringstream oss;
-    oss << "Environment::operator[] is called with a dummy variable.";
-    throw runtime_error(oss.str());
-  }
   return map_[key];
 }
 
 const Environment::mapped_type& Environment::operator[](
     const key_type& key) const {
-  if (key.is_dummy()) {
-    ostringstream oss;
-    oss << "Environment::operator[] is called with a dummy variable.";
-    throw runtime_error(oss.str());
-  }
   if (map_.count(key) == 0) {
     ostringstream oss;
     oss << "Environment::operator[] was called on a const Environment "

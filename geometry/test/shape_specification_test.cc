@@ -554,8 +554,40 @@ TEST_F(DefaultReifierTest, UnsupportedGeometry) {
                               "This class (.+) does not support HalfSpace.");
   DRAKE_EXPECT_THROWS_MESSAGE(this->ImplementGeometry(Mesh("foo", 1), nullptr),
                               "This class (.+) does not support Mesh.");
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      this->ImplementGeometry(MeshcatCone(1, 1, 1), nullptr),
+      "This class (.+) does not support MeshcatCone.");
   DRAKE_EXPECT_THROWS_MESSAGE(this->ImplementGeometry(Sphere(0.5), nullptr),
                               "This class (.+) does not support Sphere.");
+}
+
+// Test confirms that the default unsupported functionality can be replaced.
+// We'll simply replace it with a no-op. Contrast this with DefaultReifierTest.
+class OverrideDefaultGeometryTest : public ShapeReifier,
+                                    public ::testing::Test {
+ public:
+  using ShapeReifier::ThrowUnsupportedGeometry;
+  void DefaultImplementGeometry(const Shape&) final {}
+};
+
+// Tests the ability to override default implementation.
+TEST_F(OverrideDefaultGeometryTest, UnsupportedGeometry) {
+  // Confirm that throwing method is still throwing. If the subsequent calls to
+  // ImplementGeometry() fail to throw, it is because they do not invoke the
+  // throwing method.
+  DRAKE_EXPECT_THROWS_MESSAGE(this->ThrowUnsupportedGeometry("Foo"),
+                              "This class (.+) does not support Foo.");
+
+  // Confirm the default behavior no longer throws.
+  EXPECT_NO_THROW(this->ImplementGeometry(Box(1, 1, 1), nullptr));
+  EXPECT_NO_THROW(this->ImplementGeometry(Capsule(1, 2), nullptr));
+  EXPECT_NO_THROW(this->ImplementGeometry(Convex("a", 1), nullptr));
+  EXPECT_NO_THROW(this->ImplementGeometry(Cylinder(1, 2), nullptr));
+  EXPECT_NO_THROW(this->ImplementGeometry(Ellipsoid(1, 1, 1), nullptr));
+  EXPECT_NO_THROW(this->ImplementGeometry(HalfSpace(), nullptr));
+  EXPECT_NO_THROW(this->ImplementGeometry(Mesh("foo", 1), nullptr));
+  EXPECT_NO_THROW(this->ImplementGeometry(MeshcatCone(1, 1, 1), nullptr));
+  EXPECT_NO_THROW(this->ImplementGeometry(Sphere(0.5), nullptr));
 }
 
 GTEST_TEST(ShapeName, SimpleReification) {
@@ -657,6 +689,40 @@ GTEST_TEST(ShapeTest, Pathname) {
   EXPECT_TRUE(std::filesystem::path(relpath_convex.filename()).is_absolute());
   EXPECT_EQ(relpath_convex.filename(),
             std::filesystem::current_path() / "relative_path.obj");
+}
+
+GTEST_TEST(ShapeTest, MeshExtensions) {
+  // Test for case.
+  EXPECT_EQ(Mesh("a/b.obj").extension(), ".obj");
+  EXPECT_EQ(Mesh("a/b.oBj").extension(), ".obj");
+  EXPECT_EQ(Mesh("a/b.ObJ").extension(), ".obj");
+  EXPECT_EQ(Mesh("a/b.weird.ObJ").extension(), ".obj");
+  // Arbitrary extensions.
+  EXPECT_EQ(Mesh("a/b.extension").extension(), ".extension");
+
+  // Now repeat for Convex.
+
+  EXPECT_EQ(Convex("a/b.obj").extension(), ".obj");
+  EXPECT_EQ(Convex("a/b.oBj").extension(), ".obj");
+  EXPECT_EQ(Convex("a/b.ObJ").extension(), ".obj");
+  EXPECT_EQ(Convex("a/b.weird.ObJ").extension(), ".obj");
+  // Arbitrary extensions.
+  EXPECT_EQ(Convex("a/b.extension").extension(), ".extension");
+}
+
+GTEST_TEST(ShapeTest, MoveConstructor) {
+  // Create an original mesh.
+  Mesh orig("foo.obj");
+  const std::string orig_filename = orig.filename();
+  EXPECT_EQ(orig.extension(), ".obj");
+
+  // Move it into a different mesh.
+  Mesh next(std::move(orig));
+  EXPECT_EQ(next.filename(), orig_filename);
+  EXPECT_EQ(next.extension(), ".obj");
+
+  // The moved-from mesh is in a valid by indeterminate state.
+  EXPECT_EQ(orig.filename().empty(), orig.extension().empty());
 }
 
 }  // namespace

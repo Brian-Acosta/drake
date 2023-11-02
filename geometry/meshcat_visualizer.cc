@@ -1,5 +1,6 @@
 #include "drake/geometry/meshcat_visualizer.h"
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>
@@ -8,6 +9,7 @@
 #include <fmt/format.h>
 
 #include "drake/common/extract_double.h"
+#include "drake/geometry/meshcat_graphviz.h"
 #include "drake/geometry/proximity/volume_to_surface_mesh.h"
 #include "drake/geometry/utilities.h"
 
@@ -62,7 +64,7 @@ MeshcatVisualizer<T>::MeshcatVisualizer(const MeshcatVisualizer<U>& other)
 template <typename T>
 void MeshcatVisualizer<T>::Delete() const {
   meshcat_->Delete(params_.prefix);
-  version_ = GeometryVersion();
+  version_ = std::nullopt;
 }
 
 template <typename T>
@@ -124,9 +126,17 @@ systems::EventStatus MeshcatVisualizer<T>::UpdateMeshcat(
       query_object_input_port().template Eval<QueryObject<T>>(context);
   const GeometryVersion& current_version =
       query_object.inspector().geometry_version();
-
-  if (!version_.IsSameAs(current_version, params_.role)) {
+  if (!version_.has_value()) {
+    // When our current version is null, that means we haven't added any
+    // geometry to Meshcat yet, which means we also need to establish our
+    // default visibility just prior to sending the geometry.
+    meshcat_->SetProperty(params_.prefix, "visible",
+                          params_.visible_by_default);
+  }
+  if (!version_.has_value() ||
+      !version_->IsSameAs(current_version, params_.role)) {
     SetObjects(query_object.inspector());
+    SetAlphas(/* initializing = */ true);
     version_ = current_version;
   }
   SetTransforms(context, query_object);
@@ -134,7 +144,7 @@ systems::EventStatus MeshcatVisualizer<T>::UpdateMeshcat(
     double new_alpha_value = meshcat_->GetSliderValue(alpha_slider_name_);
     if (new_alpha_value != alpha_value_) {
       alpha_value_ = new_alpha_value;
-      SetColorAlphas();
+      SetAlphas(/* initializing = */ false);
     }
   }
   std::optional<double> rate = realtime_rate_calculator_.UpdateAndRecalculate(
@@ -149,8 +159,6 @@ systems::EventStatus MeshcatVisualizer<T>::UpdateMeshcat(
 template <typename T>
 void MeshcatVisualizer<T>::SetObjects(
     const SceneGraphInspector<T>& inspector) const {
-  colors_.clear();
-
   // Frames registered previously that are not set again here should be deleted.
   std::map <FrameId, std::string> frames_to_delete{};
   dynamic_frames_.swap(frames_to_delete);
@@ -175,21 +183,28 @@ void MeshcatVisualizer<T>::SetObjects(
     while ((pos = frame_path.find("::", pos)) != std::string::npos) {
       frame_path.replace(pos++, 2, "/");
     }
-    if (frame_id != inspector.world_frame_id() &&
-        inspector.NumGeometriesForFrameWithRole(frame_id, params_.role) > 0) {
-      dynamic_frames_[frame_id] = frame_path;
-      frames_to_delete.erase(frame_id);  // Don't delete this one.
-    }
 
+    bool frame_has_any_geometry = false;
     for (GeometryId geom_id : inspector.GetGeometries(frame_id, params_.role)) {
+      const GeometryProperties& properties =
+          *inspector.GetProperties(geom_id, params_.role);
+      if (properties.HasProperty("meshcat", "accepting")) {
+        if (properties.GetProperty<std::string>("meshcat", "accepting") !=
+            params_.prefix) {
+          continue;
+        }
+      } else if (!params_.include_unspecified_accepting) {
+        continue;
+      }
+
       // Note: We use the frame_path/id instead of instance.GetName(geom_id),
       // which is a garbled mess of :: and _ and a memory address by default
       // when coming from MultibodyPlant.
       // TODO(russt): Use the geometry names if/when they are cleaned up.
       const std::string path =
           fmt::format("{}/{}", frame_path, geom_id.get_value());
-      const Rgba rgba = inspector.GetProperties(geom_id, params_.role)
-          ->GetPropertyOrDefault("phong", "diffuse", params_.default_color);
+      const Rgba rgba = properties.GetPropertyOrDefault("phong", "diffuse",
+                                                        params_.default_color);
       bool used_hydroelastic = false;
       if constexpr (std::is_same_v<T, double>) {
         if (params_.show_hydroelastic) {
@@ -215,8 +230,13 @@ void MeshcatVisualizer<T>::SetObjects(
       }
       meshcat_->SetTransform(path, inspector.GetPoseInFrame(geom_id));
       geometries_[geom_id] = path;
-      colors_[geom_id] = rgba;
       geometries_to_delete.erase(geom_id);  // Don't delete this one.
+      frame_has_any_geometry = true;
+    }
+
+    if (frame_has_any_geometry && (frame_id != inspector.world_frame_id())) {
+      dynamic_frames_[frame_id] = frame_path;
+      frames_to_delete.erase(frame_id);  // Don't delete this one.
     }
   }
 
@@ -243,12 +263,19 @@ void MeshcatVisualizer<T>::SetTransforms(
 }
 
 template <typename T>
-void MeshcatVisualizer<T>::SetColorAlphas() const {
-  for (const auto& [geom_id, path] : geometries_) {
-    Rgba color = colors_[geom_id];
-    color.set(color.r(), color.g(), color.b(), alpha_value_ * color.a());
-    meshcat_->SetProperty(path, "color",
-      {color.r(), color.g(), color.b(), alpha_value_ * color.a()});
+void MeshcatVisualizer<T>::SetAlphas(bool initializing) const {
+  if (initializing) {
+    for (const auto& [_, geo_path] : geometries_) {
+      meshcat_->SetProperty(geo_path, "modulated_opacity", alpha_value_);
+    }
+  } else {
+    // The geometries visualized by this visualizer (stored in geometries_) all
+    // have a common prefix and for a well-configured visualizer, it is a
+    // *unique* prefix. So, we can rely on meshcat's behavior to update all
+    // materials in a tree with a single invocation on the root path. This
+    // requires that all object instantiations are complete in the visualizer
+    // instance.
+    meshcat_->SetProperty(params_.prefix, "modulated_opacity", alpha_value_);
   }
 }
 
@@ -256,8 +283,19 @@ template <typename T>
 systems::EventStatus MeshcatVisualizer<T>::OnInitialization(
     const systems::Context<T>&) const {
   Delete();
-  meshcat_->SetProperty(params_.prefix, "visible", params_.visible_by_default);
   return systems::EventStatus::Succeeded();
+}
+
+template <typename T>
+typename systems::LeafSystem<T>::GraphvizFragment
+MeshcatVisualizer<T>::DoGetGraphvizFragment(
+    const typename systems::LeafSystem<T>::GraphvizFragmentParams& params)
+    const {
+  internal::MeshcatGraphviz meshcat_graphviz(params_.prefix,
+                                             /* subscribe = */ false);
+  return meshcat_graphviz.DecorateResult(
+      systems::LeafSystem<T>::DoGetGraphvizFragment(
+          meshcat_graphviz.DecorateParams(params)));
 }
 
 }  // namespace geometry

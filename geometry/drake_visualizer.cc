@@ -22,6 +22,7 @@
 #include "drake/lcmt_viewer_load_robot.hpp"
 #include "drake/math/rigid_transform.h"
 #include "drake/math/rotation_matrix.h"
+#include "drake/systems/lcm/lcm_system_graphviz.h"
 
 namespace drake {
 namespace geometry {
@@ -33,12 +34,13 @@ using math::RigidTransformd;
 using std::array;
 using std::make_unique;
 using std::map;
-using std::move;
 using std::set;
 using std::vector;
 using systems::Context;
 using systems::EventStatus;
+using systems::LeafSystem;
 using systems::SystemTypeTag;
+using systems::lcm::internal::LcmSystemGraphviz;
 
 namespace {
 
@@ -88,10 +90,8 @@ lcmt_viewer_geometry_data MakeHydroMesh(GeometryId geometry_id,
   geometry_data.quaternion[2] = q.y();
   geometry_data.quaternion[3] = q.z();
 
-  Eigen::Map<Eigen::Vector4f> color(geometry_data.color);
-  Eigen::Vector4d color_vec(in_color.r(), in_color.g(), in_color.b(),
-                            in_color.a());
-  color = color_vec.cast<float>();
+  Eigen::Map<Eigen::Vector4f>(geometry_data.color) =
+      in_color.rgba().cast<float>();
 
   // There are *two* ways to use the MESH geometry type. One is to set the
   // string value with a path to a parseable mesh file (see
@@ -177,10 +177,8 @@ lcmt_viewer_geometry_data MakeDeformableSurfaceMesh(
 
   geometry_data.string_data = deformable_data.name;
 
-  Eigen::Map<Eigen::Vector4f> color(geometry_data.color);
-  Eigen::Vector4d color_vec(in_color.r(), in_color.g(), in_color.b(),
-                            in_color.a());
-  color = color_vec.cast<float>();
+  Eigen::Map<Eigen::Vector4f>(geometry_data.color) =
+      in_color.rgba().cast<float>();
 
   // We can define the mesh in the float data as:
   // V | T | v0 | v1 | ... vN | t0 | t1 | ... | tM
@@ -341,8 +339,8 @@ internal::DeformableMeshData MakeDeformableMeshData(
   }
 
   // TODO(xuchenhan-tri): Read the color of the mesh from properties.
-  return {g_id, inspector.GetName(g_id), move(surface_to_volume_vertices),
-          move(surface_triangles), volume_vertex_count};
+  return {g_id, inspector.GetName(g_id), std::move(surface_to_volume_vertices),
+          std::move(surface_triangles), volume_vertex_count};
 }
 
 // Simple class for converting shape specifications into LCM-compatible shapes.
@@ -374,10 +372,8 @@ class ShapeToLcm : public ShapeReifier {
     geometry_data_.quaternion[2] = q.y();
     geometry_data_.quaternion[3] = q.z();
 
-    Eigen::Map<Eigen::Vector4f> color(geometry_data_.color);
-    Eigen::Vector4d color_vec(in_color.r(), in_color.g(), in_color.b(),
-                              in_color.a());
-    color = color_vec.cast<float>();
+    Eigen::Map<Eigen::Vector4f>(geometry_data_.color) =
+        in_color.rgba().cast<float>();
     return geometry_data_;
   }
 
@@ -475,8 +471,8 @@ std::string MakeLcmChannelNameForRole(const std::string& channel,
   DRAKE_DEMAND(params.role != Role::kUnassigned);
 
   // These channel name transformations must be kept in sync with message
-  // consumers (meldis, drake_visualizer) in order for visualization of all
-  // roles to work.
+  // consumers (Meldis, or the legacy ``drake_visualizer`` application of days
+  // past) in order for visualization of all roles to work.
   switch (params.role) {
     case Role::kIllustration:
       return channel + "_ILLUSTRATION";
@@ -552,7 +548,7 @@ void DrakeVisualizer<T>::DispatchLoadMessage(const SceneGraph<T>& scene_graph,
 template <typename T>
 DrakeVisualizer<T>::DrakeVisualizer(lcm::DrakeLcmInterface* lcm,
                                     DrakeVisualizerParams params, bool use_lcm)
-    : systems::LeafSystem<T>(SystemTypeTag<DrakeVisualizer>{}),
+    : LeafSystem<T>(SystemTypeTag<DrakeVisualizer>{}),
       owned_lcm_((lcm || !use_lcm) ? nullptr : new lcm::DrakeLcm()),
       lcm_((lcm && use_lcm) ? lcm : owned_lcm_.get()),
       params_(std::move(params)) {
@@ -870,6 +866,21 @@ const vector<internal::DeformableMeshData>&
 DrakeVisualizer<T>::EvalDeformableMeshData(const Context<T>& context) const {
   return this->get_cache_entry(deformable_data_cache_index_)
       .template Eval<vector<internal::DeformableMeshData>>(context);
+}
+
+template <typename T>
+typename LeafSystem<T>::GraphvizFragment
+DrakeVisualizer<T>::DoGetGraphvizFragment(
+    const typename LeafSystem<T>::GraphvizFragmentParams& params) const {
+  LcmSystemGraphviz lcm_system_graphviz(
+      *lcm_, MakeLcmChannelNameForRole("DRAKE_VIEWER_DRAW", params_),
+      // We omit the message_type because it's implicit from our class name.
+      /* message_type = */ nullptr,
+      /* publish = */ true,
+      /* subscribe = */ false);
+  return lcm_system_graphviz.DecorateResult(
+      LeafSystem<T>::DoGetGraphvizFragment(
+          lcm_system_graphviz.DecorateParams(params)));
 }
 
 }  // namespace geometry

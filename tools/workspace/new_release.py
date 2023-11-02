@@ -8,13 +8,11 @@ two ways to do this:
 
 (1) Type in your password each time you run this program:
 
-  bazel build //tools/workspace:new_release
-  bazel-bin/tools/workspace/new_release --use_password
+  bazel run //tools/workspace:new_release -- --use_password
 
 (2) Use a GitHub API token:
 
-  bazel build //tools/workspace:new_release
-  bazel-bin/tools/workspace/new_release
+  bazel run //tools/workspace:new_release
 
 To create the ~/.config/readonly_github_api_token.txt file used by (2), open a
 browser to https://github.com/settings/tokens and create a new token (it does
@@ -24,8 +22,7 @@ and save the plaintext hexadecimal token to that file.
 This program can also automatically prepare upgrades for our GitHub externals
 by passing the name(s) of package(s) to upgrade as additional arguments:
 
-  bazel build //tools/workspace:new_release
-  bazel-bin/tools/workspace/new_release --lint --commit rules_python
+  bazel run //tools/workspace:new_release -- --lint --commit rules_python
 
 Note that this program runs `bazel` as a subprocess, without any special
 command line flags.  If you do need to use any flags when you run bazel,
@@ -57,10 +54,9 @@ from drake.tools.workspace.metadata import read_repository_metadata
 _IGNORED_REPOSITORIES = [
     # We don't know how to check non-default branches yet.
     "clang_cindex_python3_internal",
-    "gym_py",  # Pinned at 0.21; see tools/workspace/gym_py/README.md.
     "pybind11",
-    "usockets",  # Pinned due to upstream regression.
-    "uwebsockets",  # Pinned due to upstream regression.
+    "usockets_internal",  # Pinned due to upstream regression.
+    "uwebsockets_internal",  # Pinned due to upstream regression.
 ]
 
 # For these repositories, we only look at tags, not releases.  For the dict
@@ -87,7 +83,7 @@ _COHORTS = (
     # sdformat depends on both gz libraries; be sure to keep them aligned.
     {"sdformat_internal", "gz_math_internal", "gz_utils_internal"},
     # uwebsockets depends on usockets; be sure to keep them aligned.
-    {"uwebsockets", "usockets"},
+    {"uwebsockets_internal", "usockets_internal"},
 )
 
 
@@ -206,6 +202,10 @@ def _check_for_upgrades(gh, args, metadata):
         key = data["repository_rule_type"]
         if key == "github":
             old_commit, new_commit = _handle_github(workspace_name, gh, data)
+        elif key == "crate_universe":
+            # For details, see drake/tools/workspace/crate_universe/README.md.
+            print(f"Ignoring {workspace_name} from rules_rust")
+            continue
         elif key in ["pypi", "pypi_wheel"]:
             # TODO(jwnimmer-tri) Implement for real.
             print("{} version {} needs manual inspection".format(

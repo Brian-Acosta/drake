@@ -1,4 +1,4 @@
-load("@drake//tools/workspace:github.bzl", "github_archive")
+load("//tools/workspace:github.bzl", "github_archive")
 
 def dm_control_internal_repository(
         name,
@@ -6,8 +6,8 @@ def dm_control_internal_repository(
     github_archive(
         name = name,
         repository = "deepmind/dm_control",
-        commit = "774f46182140106e22725914aad3c6299ed91edd",
-        sha256 = "69a825c9b984453e3c8e91f383558b83d3f2b0305c5ab7b21d0772cb1da9c659",  # noqa
+        commit = "af46387b0c571d5a4f871d99b266001550a1377a",
+        sha256 = "daadbca3ea367642f8d9c2fcf1d20df0184dce66e232310af3d263c892a2cc63",  # noqa
         build_file = ":package.BUILD.bazel",
         mirrors = mirrors,
     )

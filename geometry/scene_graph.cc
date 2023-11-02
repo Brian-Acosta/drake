@@ -181,6 +181,11 @@ FrameId SceneGraph<T>::RegisterFrame(SourceId source_id, FrameId parent_id,
 }
 
 template <typename T>
+void SceneGraph<T>::RenameFrame(FrameId frame_id, const std::string& name) {
+  return model_.RenameFrame(frame_id, name);
+}
+
+template <typename T>
 GeometryId SceneGraph<T>::RegisterGeometry(
     SourceId source_id, FrameId frame_id,
     std::unique_ptr<GeometryInstance> geometry) {
@@ -193,31 +198,6 @@ GeometryId SceneGraph<T>::RegisterGeometry(
     std::unique_ptr<GeometryInstance> geometry) const {
   auto& g_state = mutable_geometry_state(context);
   return g_state.RegisterGeometry(source_id, frame_id, std::move(geometry));
-}
-
-template <typename T>
-GeometryId SceneGraph<T>::RegisterGeometry(
-    SourceId source_id, GeometryId geometry_id,
-    std::unique_ptr<GeometryInstance> geometry) {
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  // 2023-04-01 Deprecation removal.
-  return model_.RegisterGeometryWithParent(source_id, geometry_id,
-                                           std::move(geometry));
-#pragma GCC diagnostic pop
-}
-
-template <typename T>
-GeometryId SceneGraph<T>::RegisterGeometry(
-    Context<T>* context, SourceId source_id, GeometryId geometry_id,
-    std::unique_ptr<GeometryInstance> geometry) const {
-  auto& g_state = mutable_geometry_state(context);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  // 2023-04-01 Deprecation removal.
-  return g_state.RegisterGeometryWithParent(source_id, geometry_id,
-                                            std::move(geometry));
-#pragma GCC diagnostic pop
 }
 
 template <typename T>
@@ -241,6 +221,12 @@ GeometryId SceneGraph<T>::RegisterDeformableGeometry(
   auto& g_state = mutable_geometry_state(context);
   return g_state.RegisterDeformableGeometry(
       source_id, frame_id, std::move(geometry), resolution_hint);
+}
+
+template <typename T>
+void SceneGraph<T>::RenameGeometry(GeometryId geometry_id,
+                                   const std::string& name) {
+  return model_.RenameGeometry(geometry_id, name);
 }
 
 template <typename T>
@@ -277,8 +263,35 @@ void SceneGraph<T>::AddRenderer(
 }
 
 template <typename T>
+void SceneGraph<T>::AddRenderer(
+    Context<T>* context, std::string name,
+    std::unique_ptr<render::RenderEngine> renderer) const {
+  auto& g_state = mutable_geometry_state(context);
+  g_state.AddRenderer(std::move(name), std::move(renderer));
+}
+
+template <typename T>
+void SceneGraph<T>::RemoveRenderer(const std::string& name) {
+  return model_.RemoveRenderer(name);
+}
+
+template <typename T>
+void SceneGraph<T>::RemoveRenderer(Context<T>* context,
+                                   const std::string& name) const {
+  auto& g_state = mutable_geometry_state(context);
+  g_state.RemoveRenderer(name);
+}
+
+template <typename T>
 bool SceneGraph<T>::HasRenderer(const std::string& name) const {
   return model_.HasRenderer(name);
+}
+
+template <typename T>
+bool SceneGraph<T>::HasRenderer(const Context<T>& context,
+                                const std::string& name) const {
+  const auto& g_state = geometry_state(context);
+  return g_state.HasRenderer(name);
 }
 
 template <typename T>
@@ -292,13 +305,38 @@ std::string SceneGraph<T>::GetRendererTypeName(const std::string& name) const {
 }
 
 template <typename T>
+std::string SceneGraph<T>::GetRendererTypeName(const Context<T>& context,
+                                               const std::string& name) const {
+  const auto& g_state = geometry_state(context);
+  const render::RenderEngine* engine = g_state.GetRenderEngineByName(name);
+  if (engine == nullptr) {
+    return {};
+  }
+
+  return NiceTypeName::Get(*engine);
+}
+
+template <typename T>
 int SceneGraph<T>::RendererCount() const {
   return model_.RendererCount();
 }
 
 template <typename T>
+int SceneGraph<T>::RendererCount(const Context<T>& context) const {
+  const auto& g_state = geometry_state(context);
+  return g_state.RendererCount();
+}
+
+template <typename T>
 vector<std::string> SceneGraph<T>::RegisteredRendererNames() const {
   return model_.RegisteredRendererNames();
+}
+
+template <typename T>
+vector<std::string> SceneGraph<T>::RegisteredRendererNames(
+    const Context<T>& context) const {
+  const auto& g_state = geometry_state(context);
+  return g_state.RegisteredRendererNames();
 }
 
 template <typename T>
@@ -348,8 +386,9 @@ void SceneGraph<T>::AssignRole(Context<T>* context, SourceId source_id,
   static const logging::Warn one_time(
       "Due to a bug (see issue #13597), changing the illustration roles or "
       "properties in the context will not have any apparent effect in, at "
-      "least, drake_visualizer. Please change the illustration role in the "
-      "model prior to allocating the Context.");
+      "least, the legacy `drake_visualizer` application of days past. Please "
+      "change the illustration role in the model prior to allocating the "
+      "Context.");
   auto& g_state = mutable_geometry_state(context);
   g_state.AssignRole(source_id, geometry_id, std::move(properties), assign);
 }
@@ -548,6 +587,7 @@ void SceneGraph<T>::ThrowUnlessRegistered(SourceId source_id,
 template <typename T>
 GeometryState<T>& SceneGraph<T>::mutable_geometry_state(
     Context<T>* context) const {
+  this->ValidateContext(context);
   return context->get_mutable_parameters()
       .template get_mutable_abstract_parameter<GeometryState<T>>(
           geometry_state_index_);

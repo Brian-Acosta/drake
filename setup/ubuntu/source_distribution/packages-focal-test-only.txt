@@ -1,3 +1,4 @@
+clang-format-12
 curl
 kcov
 libstdc++6-10-dbg
@@ -10,7 +11,6 @@ python3-nbconvert
 python3-nbformat
 python3-numpy-dbg
 python3-opencv
-python3-pandas
 python3-psutil
 python3-requests
 python3-six

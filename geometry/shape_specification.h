@@ -202,10 +202,16 @@ class Convex final : public Shape {
   explicit Convex(const std::string& filename, double scale = 1.0);
 
   const std::string& filename() const { return filename_; }
+  /** Returns the extension of the mesh filename -- all lower case and including
+   the dot. In other words /foo/bar/mesh.obj and /foo/bar/mesh.OBJ would both
+   report the ".obj" extension. The "extension" portion of the filename is
+   defined as in std::filesystem::path::extension(). */
+  const std::string& extension() const { return extension_; }
   double scale() const { return scale_; }
 
  private:
   std::string filename_;
+  std::string extension_;
   double scale_{};
 };
 
@@ -321,11 +327,17 @@ class Mesh final : public Shape {
   explicit Mesh(const std::string& filename, double scale = 1.0);
 
   const std::string& filename() const { return filename_; }
+  /** Returns the extension of the mesh filename -- all lower case and including
+   the dot. In other words /foo/bar/mesh.obj and /foo/bar/mesh.OBJ would both
+   report the ".obj" extension. The "extension" portion of the filename is
+   defined as in std::filesystem::path::extension(). */
+  const std::string& extension() const { return extension_; }
   double scale() const { return scale_; }
 
  private:
   // NOTE: Cannot be const to support default copy/move semantics.
   std::string filename_;
+  std::string extension_;
   double scale_{};
 };
 
@@ -389,9 +401,9 @@ class Sphere final : public Shape {
 
  This class explicitly enumerates all concrete shapes in its methods. The
  addition of a new concrete shape class requires the addition of a new
- corresponding method. There should *never* be a method that accepts the Shape
- base class as an argument; it should _only_ operate on concrete derived
- classes.
+ corresponding method. There should *never* be an ImplementGeometry method that
+ accepts the Shape base class as an argument; it should _only_ operate on
+ concrete derived classes.
 
  The expected workflow is for a class that needs to turn shape specifications
  into concrete geometry instances to implement the %ShapeReifier interface
@@ -450,6 +462,12 @@ class ShapeReifier {
  protected:
   DRAKE_DEFAULT_COPY_AND_MOVE_AND_ASSIGN(ShapeReifier)
   ShapeReifier() = default;
+
+  /** The default implementation of ImplementGeometry(): it throws an exception
+   using ThrowUnsupportedGeometry(). The purpose of this function is to
+   facilitate reifiers that would call the same API on all shapes (e.g., call an
+   API with a Shape& parameter). This reduces the implementation boilerplate. */
+  virtual void DefaultImplementGeometry(const Shape& shape);
 
   /** Derived ShapeReifiers can replace the default message for unsupported
    geometries by overriding this method. The name of the unsupported shape type

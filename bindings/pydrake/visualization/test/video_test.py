@@ -1,18 +1,18 @@
-import os
-
 import math
+import os
 import sys
 import textwrap
 import unittest
 
 from pydrake.common.test_utilities import numpy_compare
-from pydrake.geometry.render import RenderLabel
+from pydrake.geometry import RenderLabel
 from pydrake.math import RollPitchYaw, RigidTransform
-from pydrake.multibody.plant import AddMultibodyPlantSceneGraph
 from pydrake.multibody.parsing import Parser
+from pydrake.multibody.plant import AddMultibodyPlantSceneGraph
 from pydrake.systems.analysis import Simulator
 from pydrake.systems.framework import DiagramBuilder
 from pydrake.systems.sensors import (
+    ImageDepth16U,
     ImageDepth32F,
     ImageLabel16I,
     ImageRgba8U,
@@ -30,29 +30,70 @@ _PLATFORM_SUPPORTS_CV2 = "darwin" not in sys.platform
 
 class TestColorizeDepthImage(unittest.TestCase):
 
-    def test_smoke(self):
-        """Runs all of the code once and spot checks a sample image."""
-        dut = ColorizeDepthImage()
-        context = dut.CreateDefaultContext()
-
-        # Input a depth image with two finite values.
-        depth = ImageDepth32F(6, 2, math.inf)
-        depth.at(5, 0)[:] = 1.0
-        depth.at(5, 1)[:] = 2.0
-        dut.GetInputPort("depth_image_32f").FixValue(context, depth)
-
-        # Expect a color image with matching values.
-        # The closest pixel is white; the farthest pixel is black.
+    def _get_expected_color(self):
+        """Creates a color image with the expected values. I.e., the closest
+        pixel is white and the farthest pixel is black. The rest of the pixels
+        are set to the default invalid color.
+        """
         default_invalid_color = [100, 0, 0, 255]
-        expected_color = ImageRgba8U(6, 2, 0)
+        expected_color = ImageRgba8U(6, 2)
         expected_color.mutable_data[:] = default_invalid_color
         expected_color.at(5, 0)[:] = [255, 255, 255, 255]
         expected_color.at(5, 1)[:] = [0, 0, 0, 255]
+        return expected_color
 
-        # Check the colorized image.
-        actual_color = dut.GetOutputPort("color_image").Eval(context)
-        numpy_compare.assert_allclose(
-            actual_color.data, expected_color.data, atol=1)
+    def _get_depth32f(self):
+        """Creates a 32F depth image with only two valid values."""
+        depth = ImageDepth32F(6, 2, math.inf)
+        depth.at(0, 0)[:] = -3.0
+        depth.at(5, 0)[:] = 1.0
+        depth.at(5, 1)[:] = 2.0
+        return depth
+
+    def _get_depth16u(self):
+        """Creates a 16U depth image with only two valid values."""
+        depth = ImageDepth16U(6, 2, 0)
+        depth.at(0, 0)[:] = 2 ** 16 - 1  # kTooFar.
+        depth.at(5, 0)[:] = 1000
+        depth.at(5, 1)[:] = 2000
+        return depth
+
+    def test_badly_connected_inputs(self):
+        dut = ColorizeDepthImage()
+        context = dut.CreateDefaultContext()
+
+        # No values for both input ports should raise an exception.
+        with self.assertRaises(AssertionError):
+            dut._calc_output(context, ImageRgba8U())
+
+        dut.GetInputPort("depth_image_32f").FixValue(
+            context, self._get_depth32f()
+        )
+        dut.GetInputPort("depth_image_16u").FixValue(
+            context, self._get_depth16u()
+        )
+        # Set values for both input ports should also raise an exception.
+        with self.assertRaises(AssertionError):
+            dut._calc_output(context, ImageRgba8U())
+
+    def test_smoke(self):
+        """Runs all of the code once for both types of depth inputs and spot
+        checks a sample image.
+        """
+        test_cases = {
+            "depth_image_32f": self._get_depth32f(),
+            "depth_image_16u": self._get_depth16u(),
+        }
+        for port_name, depth in test_cases.items():
+            dut = ColorizeDepthImage()
+            context = dut.CreateDefaultContext()
+
+            dut.GetInputPort(port_name).FixValue(context, depth)
+
+            actual_color = dut.GetOutputPort("color_image").Eval(context)
+            expected_color = self._get_expected_color()
+            numpy_compare.assert_allclose(
+                actual_color.data, expected_color.data, atol=1)
 
 
 class TestColorizeLabelImage(unittest.TestCase):
@@ -160,13 +201,13 @@ class TestVideoWriter(unittest.TestCase):
             filename=filename, builder=builder, sensor_pose=sensor_pose,
             fps=fps, kinds=kinds, backend=backend)
 
-        # Simulate for one second.
+        # Simulate for one second (add torque to the plant to make it move).
         diagram = builder.Build()
         simulator = Simulator(diagram)
         diagram_context = simulator.get_mutable_context()
         plant_context = plant.GetMyMutableContextFromRoot(diagram_context)
         plant.get_actuation_input_port().FixValue(
-            plant_context, [0] * plant.num_positions())
+            plant_context, [10] * plant.num_positions())
         simulator.AdvanceTo(1.0)
         writer.Save()
 
@@ -202,6 +243,18 @@ class TestVideoWriter(unittest.TestCase):
         """Tests cv2 (mp4) output of a color+depth+label."""
         filename = os.environ["TEST_UNDECLARED_OUTPUTS_DIR"] + "/multi.mp4"
         self._test_usage(filename, "cv2", ("color", "depth", "label"))
+
+    @unittest.skipUnless(_PLATFORM_SUPPORTS_CV2, "Not tested on this platform")
+    def test_cv2_bad_fourcc(self):
+        """Tests cv2 sanity checking of fourcc."""
+        builder = DiagramBuilder()
+        AddMultibodyPlantSceneGraph(builder, time_step=0.0)
+        filename = os.environ["TEST_UNDECLARED_OUTPUTS_DIR"] + "/bad.mp4"
+        with self.assertRaisesRegex(ValueError, "wrong.*must be"):
+            VideoWriter.AddToBuilder(
+                filename=filename, builder=builder,
+                sensor_pose=RigidTransform(), fps=16, backend="cv2",
+                fourcc="wrong")
 
     def test_bad_backend(self):
         """Tests detection of a malformed backend setting."""

@@ -7,13 +7,13 @@
 #include <string>
 #include <utility>
 
-#include <drake_vendor/sdf/Box.hh>
-#include <drake_vendor/sdf/Capsule.hh>
-#include <drake_vendor/sdf/Cylinder.hh>
-#include <drake_vendor/sdf/Element.hh>
-#include <drake_vendor/sdf/Ellipsoid.hh>
-#include <drake_vendor/sdf/Plane.hh>
-#include <drake_vendor/sdf/Sphere.hh>
+#include <sdf/Box.hh>
+#include <sdf/Capsule.hh>
+#include <sdf/Cylinder.hh>
+#include <sdf/Element.hh>
+#include <sdf/Ellipsoid.hh>
+#include <sdf/Plane.hh>
+#include <sdf/Sphere.hh>
 
 #include "drake/geometry/geometry_instance.h"
 #include "drake/geometry/proximity_properties.h"
@@ -29,7 +29,6 @@ namespace internal {
 
 using Eigen::Vector3d;
 using std::make_unique;
-using std::move;
 using std::set;
 using std::string;
 
@@ -287,7 +286,7 @@ std::optional<std::unique_ptr<GeometryInstance>>
     return nullptr;
   }
   auto instance =
-      make_unique<GeometryInstance>(X_LC, move(*shape), sdf_visual.Name());
+      make_unique<GeometryInstance>(X_LC, std::move(*shape), sdf_visual.Name());
   std::optional<IllustrationProperties> illustration_properties =
       MakeVisualPropertiesFromSdfVisual(
           diagnostic, sdf_visual, resolve_filename);
@@ -388,7 +387,7 @@ std::optional<IllustrationProperties> MakeVisualPropertiesFromSdfVisual(
       accepting = accepting->GetNextElement(kAcceptingTag);
     }
     DRAKE_DEMAND(accepting_names.size() > 0);
-    properties.AddProperty("renderer", "accepting", move(accepting_names));
+    properties.AddProperty("renderer", "accepting", std::move(accepting_names));
   }
 
   return properties;

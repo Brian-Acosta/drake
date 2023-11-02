@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include <drake_vendor/fcl/fcl.h>
+#include <fcl/fcl.h>
 #include <fmt/format.h>
 
 #include "drake/common/default_scalars.h"
@@ -43,7 +43,6 @@ using math::RigidTransform;
 using math::RigidTransformd;
 using std::make_shared;
 using std::make_unique;
-using std::move;
 using std::shared_ptr;
 using std::unique_ptr;
 using std::unordered_map;
@@ -464,13 +463,33 @@ class ProximityEngine<T>::Impl : public ShapeReifier {
     ProcessGeometriesForDeformableContact(capsule, user_data);
   }
 
+  // For proximity role, a Convex surface mesh can come from a surface mesh in
+  // obj file or a tetrahedral mesh in vtk file, from which we extract its
+  // surface.
   void ImplementGeometry(const Convex& convex, void* user_data) override {
-    // Don't bother triangulating; Convex supports polygons.
-    const auto [vertices, faces, num_faces] =
-        ReadObjFile(convex.filename(), convex.scale(), false /* triangulate */);
-
+    shared_ptr<const std::vector<Vector3d>> shared_verts;
+    shared_ptr<std::vector<int>> shared_faces;
+    int num_faces{0};
+    if (convex.extension() == ".obj") {
+      // Don't bother triangulating; Convex supports polygons.
+      std::tie(shared_verts, shared_faces, num_faces) =
+          ReadObjFile(convex.filename(), convex.scale(),
+                      false /* triangulate */);
+    } else if  (convex.extension() == ".vtk") {
+      auto surface_mesh = ConvertVolumeToSurfaceMesh(
+          ReadVtkToVolumeMesh(convex.filename()));
+      shared_verts = make_shared<const std::vector<Vector3d>>(
+          surface_mesh.vertices());
+      shared_faces = make_shared<std::vector<int>>();
+    } else {
+      throw std::runtime_error(fmt::format(
+          "ProximityEngine: Convex shapes only support .obj or .vtk files;"
+          " got ({}) instead.",
+          convex.filename()));
+    }
     // Create fcl::Convex.
-    auto fcl_convex = make_shared<fcl::Convexd>(vertices, num_faces, faces);
+    auto fcl_convex =
+        make_shared<fcl::Convexd>(shared_verts, num_faces, shared_faces);
 
     TakeShapeOwnership(fcl_convex, user_data);
     ProcessHydroelastic(convex, user_data);
@@ -528,22 +547,24 @@ class ProximityEngine<T>::Impl : public ShapeReifier {
       shared_verts = make_shared<const std::vector<Vector3d>>(
           hydroelastic_geometries_.rigid_geometry(data.id).mesh().vertices());
     } else {
-      std::string extension =
-          std::filesystem::path(mesh.filename()).extension();
-      std::transform(extension.begin(), extension.end(), extension.begin(),
-                     [](unsigned char c) { return std::tolower(c); });
-      if (extension != ".obj") {
-        throw std::runtime_error(
-            fmt::format("ProximityEngine: expect an Obj file for "
-                        "non-hydroelastics but get {} file ({}) instead.",
-                        extension, mesh.filename()));
+      if (mesh.extension() == ".vtk") {
+        // TODO(rpoyner-tri): could take convex hull here.
+        shared_verts = make_shared<const std::vector<Vector3d>>(
+            ConvertVolumeToSurfaceMesh(
+                ReadVtkToVolumeMesh(mesh.filename()))
+            .vertices());
+      } else if (mesh.extension() == ".obj") {
+        // Don't bother triangulating; we're ignoring the faces.
+        std::tie(shared_verts, std::ignore, std::ignore) =
+            ReadObjFile(mesh.filename(), mesh.scale(), false /* triangulate */);
+      } else {
+        // TODO(SeanCurtis-TRI) Add a troubleshooting entry to give more
+        //  helpful advice.
+        throw std::runtime_error(fmt::format(
+            "ProximityEngine: Mesh shapes for non-hydroelastic "
+            "contact only support .obj or .vtk files; got ({}) instead.",
+            mesh.filename()));
       }
-      // TODO(SeanCurtis-TRI) Add a troubleshooting entry to give more helpful
-      //  advice.
-
-      // Don't bother triangulating; we're ignoring the faces.
-      std::tie(shared_verts, std::ignore, std::ignore) =
-          ReadObjFile(mesh.filename(), mesh.scale(), false /* triangulate */);
     }
 
     // Note: the strategy here is to use an *invalid* fcl::Convex shape for the
@@ -603,8 +624,8 @@ class ProximityEngine<T>::Impl : public ShapeReifier {
     std::vector<SignedDistancePair<T>> witness_pairs;
     double max_distance = std::numeric_limits<double>::infinity();
     // All these quantities are aliased in the callback data.
-    shape_distance::CallbackData<T> data{&collision_filter_, &X_WGs,
-                                         max_distance, &witness_pairs};
+    shape_distance::CallbackData<T> data{nullptr, &X_WGs, max_distance,
+                                         &witness_pairs};
     data.request.enable_nearest_points = true;
     data.request.enable_signed_distance = true;
     data.request.gjk_solver_type = fcl::GJKSolverType::GST_LIBCCD;
@@ -628,11 +649,9 @@ class ProximityEngine<T>::Impl : public ShapeReifier {
     CollisionObjectd* object_B = find_geometry(id_B);
     shape_distance::Callback<T>(object_A, object_B, &data, max_distance);
 
-    if (witness_pairs.size() == 0) {
-      throw std::runtime_error(fmt::format(
-          "The geometry pair ({}, {}) does not support a signed distance query",
-          id_A, id_B));
-    }
+    // If the callback didn't throw, it returned an actual value.
+    DRAKE_DEMAND(witness_pairs.size() > 0);
+
     return witness_pairs[0];
   }
 
@@ -774,7 +793,8 @@ class ProximityEngine<T>::Impl : public ShapeReifier {
   void ComputeDeformableContact(
       DeformableContact<double>* deformable_contact) const {
     *deformable_contact =
-        geometries_for_deformable_contact_.ComputeDeformableContact();
+        geometries_for_deformable_contact_.ComputeDeformableContact(
+            collision_filter_);
   }
 
   // Testing utilities

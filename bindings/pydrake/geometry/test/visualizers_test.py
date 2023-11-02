@@ -2,12 +2,12 @@ import pydrake.geometry as mut
 
 import copy
 import unittest
+import urllib.request
 
 import numpy as np
 
 from drake import lcmt_viewer_load_robot, lcmt_viewer_draw
 from pydrake.autodiffutils import AutoDiffXd
-from pydrake.common.value import AbstractValue
 from pydrake.common.test_utilities import numpy_compare
 from pydrake.lcm import DrakeLcm, Subscriber
 from pydrake.math import RigidTransform
@@ -100,6 +100,7 @@ class TestGeometryVisualizers(unittest.TestCase):
             meshcat2 = mut.Meshcat(port=port)
         self.assertIn("http", meshcat.web_url())
         self.assertIn("ws", meshcat.ws_url())
+        meshcat.SetEnvironmentMap(image_path="")
         meshcat.SetObject(path="/test/box",
                           shape=mut.Box(1, 1, 1),
                           rgba=mut.Rgba(.5, .5, .5))
@@ -170,6 +171,9 @@ class TestGeometryVisualizers(unittest.TestCase):
         meshcat.Set2dRenderMode(
             X_WC=RigidTransform(), xmin=-1, xmax=1, ymin=-1, ymax=1)
         meshcat.ResetRenderMode()
+        meshcat.SetCameraTarget(target_in_world=[1, 2, 3])
+        meshcat.SetCameraPose(camera_in_world=[3, 4, 5],
+                              target_in_world=[1, 1, 1])
         meshcat.AddButton(name="button", keycode="KeyB")
         self.assertEqual(meshcat.GetButtonClicks(name="button"), 0)
         meshcat.DeleteButton(name="button")
@@ -194,6 +198,7 @@ class TestGeometryVisualizers(unittest.TestCase):
         self.assertEqual(len(gamepad.button_values), 0)
         self.assertEqual(len(gamepad.axes), 0)
         meshcat.SetRealtimeRate(1.0)
+        meshcat.GetRealtimeRate()
         meshcat.Flush()
 
         meshcat.StartRecording(frames_per_second=64.0,
@@ -238,6 +243,14 @@ class TestGeometryVisualizers(unittest.TestCase):
         copy.copy(camera)
         meshcat.SetCamera(camera=camera, path="mypath")
 
+        packed = meshcat._GetPackedObject(path="/test/box")
+        self.assertGreater(len(packed), 0)
+        packed = meshcat._GetPackedTransform(path="/test/box")
+        self.assertGreater(len(packed), 0)
+        packed = meshcat._GetPackedProperty(path="/Background",
+                                            property="visible")
+        self.assertGreater(len(packed), 0)
+
     def test_meshcat_animation(self):
         animation = mut.MeshcatAnimation(frames_per_second=64)
         self.assertEqual(animation.frames_per_second(), 64)
@@ -278,6 +291,7 @@ class TestGeometryVisualizers(unittest.TestCase):
         self.assertIn("publish_period", repr(params))
         copy.copy(params)
         vis = mut.MeshcatVisualizer_[T](meshcat=meshcat, params=params)
+        vis.ResetRealtimeRateCalculator()
         vis.Delete()
         self.assertIsInstance(vis.query_object_input_port(), InputPort_[T])
         animation = vis.StartRecording(set_transforms_while_recording=True)
@@ -316,8 +330,7 @@ class TestGeometryVisualizers(unittest.TestCase):
         context = visualizer.CreateDefaultContext()
         cloud = PointCloud(4)
         cloud.mutable_xyzs()[:] = np.zeros((3, 4))
-        visualizer.cloud_input_port().FixValue(
-          context, AbstractValue.Make(cloud))
+        visualizer.cloud_input_port().FixValue(context, cloud)
         self.assertIsInstance(visualizer.pose_input_port(), InputPort_[T])
         visualizer.ForcedPublish(context)
         visualizer.Delete()
@@ -328,6 +341,13 @@ class TestGeometryVisualizers(unittest.TestCase):
 
     def test_start_meshcat(self):
         # StartMeshcat only performs interesting work on cloud notebook hosts.
-        # Here we simply ensure that it runs.
+        # Here we simply ensure that it runs and is available.
         meshcat = mut.StartMeshcat()
         self.assertIsInstance(meshcat, mut.Meshcat)
+        with urllib.request.urlopen(meshcat.web_url()) as response:
+            content_type = response.getheader("Content-Type")
+            some_data = response.read(4096)
+        # This also serves as a regresion test of the C++ code, where parsing
+        # the Content-Type is difficult within its unit test infrastructure.
+        self.assertIn("text/html", content_type)
+        self.assertIn("DOCTYPE html", some_data.decode("utf-8"))

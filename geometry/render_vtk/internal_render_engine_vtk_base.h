@@ -1,12 +1,14 @@
 #pragma once
 
-#include <vtkCylinderSource.h>
-#include <vtkSmartPointer.h>
-#include <vtkTexturedSphereSource.h>
-#include <vtkTransform.h>
-#include <vtkTransformPolyDataFilter.h>
+// To ease build system upkeep, we annotate VTK includes with their deps.
+#include <vtkCylinderSource.h>           // vtkFiltersSources
+#include <vtkSmartPointer.h>             // vtkCommonCore
+#include <vtkTexturedSphereSource.h>     // vtkFiltersSources
+#include <vtkTransform.h>                // vtkCommonTransforms
+#include <vtkTransformPolyDataFilter.h>  // vtkFiltersGeneral
 
 #include "drake/geometry/geometry_roles.h"
+#include "drake/geometry/render/render_mesh.h"
 #include "drake/geometry/shape_specification.h"
 
 namespace drake {
@@ -26,6 +28,10 @@ vtkSmartPointer<vtkPolyDataAlgorithm> CreateVtkBox(
 // Creates a VTK ellipsoid scaled from a sphere.
 vtkSmartPointer<vtkPolyDataAlgorithm> CreateVtkEllipsoid(
     const Ellipsoid& ellipsoid);
+
+// Creates a VTK mesh from the given mesh data.
+vtkSmartPointer<vtkPolyDataAlgorithm> CreateVtkMesh(
+    geometry::internal::RenderMesh mesh_data);
 
 // Sets common sphere options such as its dimensions and resolution.
 void SetSphereOptions(vtkTexturedSphereSource* vtk_sphere, double radius);

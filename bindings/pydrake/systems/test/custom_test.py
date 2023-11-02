@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import copy
+import sys
 from types import SimpleNamespace
 import unittest
 import warnings
@@ -9,7 +10,7 @@ import numpy as np
 
 from pydrake.autodiffutils import AutoDiffXd
 from pydrake.common.test_utilities.deprecation import catch_drake_warnings
-from pydrake.common.value import AbstractValue
+from pydrake.common.value import Value
 from pydrake.symbolic import Expression
 from pydrake.systems.analysis import (
     Simulator,
@@ -79,6 +80,19 @@ class CustomAdder(LeafSystem):
             input_vector = self.EvalVectorInput(context=context, port_index=i)
             sum += input_vector.get_value()
 
+    def DoGetGraphvizFragment(self, params):
+        # N.B. We cannot use `header_lines.append(...)` here; the property
+        # getter returns a _copy_ of the lines, not a _reference_.
+        params.header_lines += ["hello=world"]
+        if sys.version_info[:2] >= (3, 9):
+            params.options |= {"split": "I/O"}
+        else:
+            # TODO(jwnimmer-tri) Kill this spelling when we drop Ubuntu 20.04.
+            options = params.options
+            options.update({"split": "I/O"})
+            params.options = options
+        return super().DoGetGraphvizFragment(params)
+
 
 # TODO(eric.cousineau): Make this class work with custom scalar types once
 # referencing with custom dtypes lands.
@@ -101,14 +115,17 @@ class CustomVectorSystem(VectorSystem):
         self.has_called = []
 
     def DoCalcVectorOutput(self, context, u, x, y):
+        self.ValidateContext(context=context)
         y[:] = np.hstack([u, x])
         self.has_called.append("output")
 
     def DoCalcVectorTimeDerivatives(self, context, u, x, x_dot):
+        self.ValidateContext(context)
         x_dot[:] = x + u
         self.has_called.append("continuous")
 
     def DoCalcVectorDiscreteVariableUpdates(self, context, u, x, x_n):
+        self.ValidateContext(context)
         x_n[:] = x + 2*u
         self.has_called.append("discrete")
 
@@ -129,6 +146,12 @@ class CustomDiagram(Diagram):
         for i in range(num_inputs):
             builder.ExportInput(adder.get_input_port(i))
         builder.BuildInto(self)
+
+    def DoGetGraphvizFragment(self, params):
+        # N.B. We cannot use `header_lines.append(...)` here; the property
+        # getter returns a _copy_ of the lines, not a _reference_.
+        params.header_lines += ["meaning_of_life=42"]
+        return super().DoGetGraphvizFragment(params)
 
 
 class TestCustom(unittest.TestCase):
@@ -184,6 +207,17 @@ class TestCustom(unittest.TestCase):
                  .get_discrete_state_vector().get_value())
         self.assertTrue(np.allclose([5, 7, 9], value))
 
+    def test_adder_graphviz(self):
+        system = CustomAdder(2, 3)
+        graph = system.GetGraphvizString()
+        self.assertIn("hello=world", graph)
+        self.assertIn("(split)", graph)
+
+    def test_diagram_graphviz(self):
+        system = CustomDiagram(2, 3)
+        graph = system.GetGraphvizString()
+        self.assertIn("meaning_of_life=42", graph)
+
     def test_leaf_system_well_known_tickets(self):
         for func in [
                 LeafSystem.accuracy_ticket,
@@ -213,8 +247,8 @@ class TestCustom(unittest.TestCase):
 
     def test_leaf_system_per_item_tickets(self):
         dut = LeafSystem()
-        dut.DeclareAbstractParameter(model_value=AbstractValue.Make(1))
-        dut.DeclareAbstractState(model_value=AbstractValue.Make(1))
+        dut.DeclareAbstractParameter(model_value=Value(1))
+        dut.DeclareAbstractState(model_value=Value(1))
         dut.DeclareDiscreteState(1)
         dut.DeclareVectorInputPort("u0", BasicVector(1))
         self.assertEqual(dut.DeclareVectorInputPort("u1", 2).size(), 2)
@@ -234,7 +268,7 @@ class TestCustom(unittest.TestCase):
 
         # Cover DeclareCacheEntry.
         dummy = LeafSystem()
-        model_value = AbstractValue.Make(SimpleNamespace())
+        model_value = Value(SimpleNamespace())
 
         def calc_cache(context, abstract_value):
             cache = abstract_value.get_mutable_value()
@@ -249,17 +283,29 @@ class TestCustom(unittest.TestCase):
             prerequisites_of_calc={dummy.nothing_ticket()})
         self.assertIsInstance(cache_entry, CacheEntry)
 
+        context = dummy.CreateDefaultContext()
+
         # Cover CacheEntry and get_cache_entry.
         self.assertIsInstance(cache_entry.prerequisites(), set)
+        self.assertTrue(cache_entry.is_out_of_date(context))
+        self.assertFalse(cache_entry.is_cache_entry_disabled(context))
+        cache_entry.disable_caching(context)
+        self.assertTrue(cache_entry.is_cache_entry_disabled(context))
+        cache_entry.enable_caching(context)
+        self.assertFalse(cache_entry.is_cache_entry_disabled(context))
+        self.assertFalse(cache_entry.is_disabled_by_default())
+        cache_entry.disable_caching_by_default()
+        self.assertTrue(cache_entry.is_disabled_by_default())
+        self.assertIsInstance(cache_entry.description(), str)
         cache_index = cache_entry.cache_index()
         self.assertIsInstance(cache_index, CacheIndex)
         self.assertIsInstance(cache_entry.ticket(), DependencyTicket)
         self.assertIs(dummy.get_cache_entry(cache_index), cache_entry)
+        self.assertFalse(cache_entry.has_default_prerequisites())
 
         # Cover CacheEntryValue.
         # WARNING: This is not the suggested workflow for proper bindings. See
         # below for proper workflow using .Eval().
-        context = dummy.CreateDefaultContext()
         cache_entry_value = cache_entry.get_mutable_cache_entry_value(context)
         self.assertIsInstance(cache_entry_value, CacheEntryValue)
         data = cache_entry_value.GetMutableValueOrThrow()
@@ -330,10 +376,13 @@ class TestCustom(unittest.TestCase):
                 self.called_reset = False
                 self.called_system_reset = False
                 # Ensure we have desired overloads.
-                self.DeclarePeriodicPublishNoHandler(1.0)
-                self.DeclarePeriodicPublishNoHandler(1.0, 0)
-                self.DeclarePeriodicPublishNoHandler(
-                    period_sec=1.0, offset_sec=0)
+                with catch_drake_warnings(expected_count=1):
+                    self.DeclarePeriodicPublishNoHandler(1.0)
+                with catch_drake_warnings(expected_count=1):
+                    self.DeclarePeriodicPublishNoHandler(1.0, 0)
+                with catch_drake_warnings(expected_count=1):
+                    self.DeclarePeriodicPublishNoHandler(
+                        period_sec=1.0, offset_sec=0)
                 self.DeclareInitializationPublishEvent(
                     publish=self._on_initialize_publish)
                 self.DeclareInitializationDiscreteUpdateEvent(
@@ -344,8 +393,9 @@ class TestCustom(unittest.TestCase):
                     event=PublishEvent(
                         trigger_type=TriggerType.kInitialization,
                         callback=self._on_initialize))
-                self.DeclarePeriodicDiscreteUpdateNoHandler(
-                    period_sec=1.0, offset_sec=0.)
+                with catch_drake_warnings(expected_count=1):
+                    self.DeclarePeriodicDiscreteUpdateNoHandler(
+                        period_sec=1.0, offset_sec=0.)
                 self.DeclarePeriodicPublishEvent(
                     period_sec=1.0,
                     offset_sec=0,
@@ -408,10 +458,17 @@ class TestCustom(unittest.TestCase):
                     "system reset", WitnessFunctionDirection.kCrossesZero,
                     self._guard, UnrestrictedUpdateEvent(
                         system_callback=self._system_reset))
+                self.witness_result = 1.0
+                self.getwitness_result = [
+                    self.witness,
+                    self.reset_witness,
+                    self.system_reset_witness,
+                ]
 
             def DoPublish(self, context, events):
                 # Call base method to ensure we do not get recursion.
-                LeafSystem.DoPublish(self, context, events)
+                with catch_drake_warnings(expected_count=1):
+                    LeafSystem.DoPublish(self, context, events)
                 # N.B. We do not test for a singular call to `DoPublish`
                 # (checking `assertFalse(self.called_publish)` first) because
                 # the above `_DeclareInitializationEvent` will call both its
@@ -429,14 +486,14 @@ class TestCustom(unittest.TestCase):
             def DoCalcDiscreteVariableUpdates(
                     self, context, events, discrete_state):
                 # Call base method to ensure we do not get recursion.
-                LeafSystem.DoCalcDiscreteVariableUpdates(
-                    self, context, events, discrete_state)
+                with catch_drake_warnings(expected_count=1):
+                    LeafSystem.DoCalcDiscreteVariableUpdates(
+                        self, context, events, discrete_state)
                 self.called_discrete = True
 
             def DoGetWitnessFunctions(self, context):
                 self.called_getwitness = True
-                return [self.witness, self.reset_witness,
-                        self.system_reset_witness]
+                return self.getwitness_result
 
             def _on_initialize(self, context, event):
                 test.assertIsInstance(context, Context)
@@ -535,7 +592,7 @@ class TestCustom(unittest.TestCase):
             def _witness(self, context):
                 test.assertIsInstance(context, Context)
                 self.called_witness = True
-                return 1.0
+                return self.witness_result
 
             def _guard(self, context):
                 test.assertIsInstance(context, Context)
@@ -638,6 +695,41 @@ class TestCustom(unittest.TestCase):
         self.assertTrue(system.called_reset)
         self.assertTrue(system.called_system_reset)
 
+        # Test ExecuteInitializationEvents.
+        system = TrivialSystem()
+        context = system.CreateDefaultContext()
+        system.ExecuteInitializationEvents(context=context)
+        self.assertFalse(system.called_per_step)
+        self.assertFalse(system.called_periodic)
+        self.assertTrue(system.called_initialize_publish)
+        self.assertTrue(system.called_initialize_discrete)
+        self.assertTrue(system.called_initialize_unrestricted)
+        self.assertFalse(system.called_periodic_publish)
+        self.assertFalse(system.called_periodic_discrete)
+        self.assertFalse(system.called_periodic_unrestricted)
+        self.assertFalse(system.called_per_step_publish)
+        self.assertFalse(system.called_per_step_discrete)
+        self.assertFalse(system.called_per_step_unrestricted)
+        self.assertFalse(system.called_getwitness)
+        self.assertFalse(system.called_witness)
+        self.assertFalse(system.called_guard)
+        self.assertFalse(system.called_reset)
+        self.assertFalse(system.called_system_reset)
+
+        # Test witness function error messages.
+        system = TrivialSystem()
+        system.getwitness_result = None
+        simulator = Simulator(system)
+        with self.assertRaisesRegex(TypeError, "NoneType"):
+            simulator.AdvanceTo(0.1)
+        self.assertTrue(system.called_getwitness)
+        system = TrivialSystem()
+        system.witness_result = None
+        simulator = Simulator(system)
+        with self.assertRaisesRegex(TypeError, "NoneType"):
+            simulator.AdvanceTo(0.1)
+        self.assertTrue(system.called_witness)
+
     def test_event_handler_returns_none(self):
         """Checks that a Python event handler callback function is allowed to
         (implicitly) return None, instead of an EventStatus. Because of all the
@@ -676,7 +768,7 @@ class TestCustom(unittest.TestCase):
         xd_port = dut.DeclareStateOutputPort(name="xd", state_index=xd_index)
         self.assertEqual(xd_port.size(), 3)
 
-        xa_index = dut.DeclareAbstractState(AbstractValue.Make(1))
+        xa_index = dut.DeclareAbstractState(Value(1))
         xa_port = dut.DeclareStateOutputPort(name="xa", state_index=xa_index)
         self.assertEqual(xa_port.get_name(), "xa")
 
@@ -719,7 +811,7 @@ class TestCustom(unittest.TestCase):
 
     def test_context_api(self):
         # Capture miscellaneous functions not yet tested.
-        model_value = AbstractValue.Make("Hello")
+        model_value = Value("Hello")
         model_vector = BasicVector([1., 2.])
 
         class TrivialSystem(LeafSystem):
@@ -777,7 +869,7 @@ class TestCustom(unittest.TestCase):
             state.get_mutable_abstract_state(index=0) is
             state.get_mutable_abstract_state().get_value(index=0))
 
-        # Check abstract state API (also test AbstractValues).
+        # Check abstract state API (also test Values).
         values = context.get_abstract_state()
         self.assertEqual(values.size(), 1)
         self.assertEqual(
@@ -896,10 +988,10 @@ class TestCustom(unittest.TestCase):
                 def __init__(self):
                     LeafSystem_[T].__init__(self)
                     self.input_port = self.DeclareAbstractInputPort(
-                        "in", AbstractValue.Make(default_value))
+                        "in", Value(default_value))
                     self.output_port = self.DeclareAbstractOutputPort(
                         "out",
-                        lambda: AbstractValue.Make(default_value),
+                        lambda: Value(default_value),
                         self.DoCalcAbstractOutput,
                         prerequisites_of_calc=set([
                             self.input_port.ticket()]))
@@ -941,7 +1033,7 @@ class TestCustom(unittest.TestCase):
         class SystemWithCacheAndState(LeafSystem):
             def __init__(self):
                 super().__init__()
-                model_value = AbstractValue.Make(arbitrary_object)
+                model_value = Value(arbitrary_object)
                 self.state_index = self.DeclareAbstractState(model_value)
 
                 def calc_cache_noop(context, abstract_value):

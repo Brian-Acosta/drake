@@ -16,17 +16,14 @@ namespace lcm {
 /**
  * %SerializerInterface translates between LCM message bytes and
  * drake::AbstractValue objects that contain LCM messages, e.g., a
- * Value<lcmt_drake_signal>.  See Serializer for a message-specific concrete
- * subclass.
+ * Value<lcmt_drake_signal>.  All `const` methods are threadsafe.
+ * See Serializer for a message-specific concrete subclass.
  */
 class SerializerInterface {
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(SerializerInterface)
 
   virtual ~SerializerInterface();
-
-  /** Creates a deep copy of this. */
-  virtual std::unique_ptr<SerializerInterface> Clone() const = 0;
 
   /**
    * Creates a value-initialized (zeroed) instance of the message object.
@@ -37,9 +34,8 @@ class SerializerInterface {
   /**
    * Translates LCM message bytes into a drake::AbstractValue object.
    */
-  virtual void Deserialize(
-      const void* message_bytes, int message_length,
-      AbstractValue* abstract_value) const = 0;
+  virtual void Deserialize(const void* message_bytes, int message_length,
+                           AbstractValue* abstract_value) const = 0;
 
   /**
    * Translates a drake::AbstractValue object into LCM message bytes.
@@ -65,10 +61,6 @@ class Serializer : public SerializerInterface {
   Serializer() = default;
   ~Serializer() override = default;
 
-  std::unique_ptr<SerializerInterface> Clone() const override {
-    return std::make_unique<Serializer>();
-  }
-
   std::unique_ptr<AbstractValue> CreateDefaultValue() const override {
     // NOTE: We create the message using value-initialization ("{}") to ensure
     // the POD fields are zeroed (instead of using default construction ("()"),
@@ -76,9 +68,8 @@ class Serializer : public SerializerInterface {
     return std::make_unique<Value<LcmMessage>>(LcmMessage{});
   }
 
-  void Deserialize(
-      const void* message_bytes, int message_length,
-      AbstractValue* abstract_value) const override {
+  void Deserialize(const void* message_bytes, int message_length,
+                   AbstractValue* abstract_value) const override {
     DRAKE_DEMAND(abstract_value != nullptr);
     LcmMessage& message = abstract_value->get_mutable_value<LcmMessage>();
     int consumed = message.decode(message_bytes, 0, message_length);

@@ -96,6 +96,14 @@
  *     <td align="center">⟡</td>
  *     <td align="center">⟡</td>
  * </tr>
+ * <tr><td><a href="https://github.com/oxfordcontrol/Clarabel.rs">
+ *    Clarabel</a> ▣</td>
+ *    <td align="center">♦</td>
+ *    <td align="center">♦</td>
+ *    <td align="center">♦</td>
+ *    <td align="center"></td>
+ *    <td align="center"></td>
+ * </tr>
  * <tr><td><a href="https://github.com/cvxgrp/scs">
  *    SCS</a></td>
  *    <td align="center">△</td>
@@ -138,7 +146,9 @@
  * </table>
  *
  * † This is a commercial solver which requires a license
- * (note that some have free licenses for academics).
+ * (note that some have free licenses for academics). See <a
+ * href="https://drake.mit.edu/bazel.html#proprietary-solvers"> the build system
+ * documentation</a> for details.
  *
  * ‡ <a href="https://drake.mit.edu/installation.html">Drake's pre-compiled
  * binary releases</a> incorporate a private build of SNOPT that does not
@@ -151,6 +161,9 @@
  * to handle free variables (refer to RemoveFreeVariableMethod for more
  * details). These heuristics can make the problem expensive to solve or
  * poorly conditioned.
+ *
+ * ▣ Drake's support on Clarabel is experimental. Some Clarabel's features (such
+ * as positive semidfinite constraints) are not supported by Drake yet.
  *
  * △ These solvers are not accurate. They implement ADMM algorithm, which
  * converges quickly to a low-accuracy solution, and requires many iterations to
@@ -198,7 +211,9 @@
  * </table>
  *
  * † This is a commercial solver which requires a license
- * (note that some have free licenses for academics).
+ * (note that some have free licenses for academics). See <a
+ * href="https://drake.mit.edu/bazel.html#proprietary-solvers"> the build system
+ * documentation</a> for details.
  *
  * ♦ A preferred solver for the given category.
  *
@@ -241,7 +256,9 @@
  * </table>
  *
  * † This is a commercial solver which requires a license
- * (note that some have free licenses for academics).
+ * (note that some have free licenses for academics). See <a
+ * href="https://drake.mit.edu/bazel.html#proprietary-solvers"> the build system
+ * documentation</a> for details.
  *
  * ‡ <a href="https://drake.mit.edu/installation.html">Drake's pre-compiled
  * binary releases</a> incorporate a private build of SNOPT that does not

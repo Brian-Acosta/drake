@@ -1,5 +1,8 @@
 #pragma once
 
+#include <string>
+#include <string_view>
+
 /** @file
 Provides a portable macro for use in generating compile-time warnings for
 use of code that is permitted but discouraged. */
@@ -56,10 +59,35 @@ Sample uses: @code
 
 #else  // DRAKE_DOXYGEN_CXX
 
-#define DRAKE_DEPRECATED(removal_date, message)         \
-  [[deprecated(                                         \
-  "\nDRAKE DEPRECATED: " message                        \
-  "\nThe deprecated code will be removed from Drake"    \
-  " on or after " removal_date ".")]]
+#define DRAKE_DEPRECATED(removal_date, message)                   \
+  [[deprecated("\nDRAKE DEPRECATED: " message                     \
+               "\nThe deprecated code will be removed from Drake" \
+               " on or after " removal_date ".")]]
 
 #endif  // DRAKE_DOXYGEN_CXX
+
+namespace drake {
+namespace internal {
+
+/* When constructed, logs a deprecation message; the destructor is guaranteed
+to be trivial. This is useful for declaring an instance of this class as a
+function-static global, so that a warning is logged the first time the program
+encounters some code, but does not repeat the warning on subsequent encounters
+within the same process.
+
+For example:
+<pre>
+void OldCalc(double data) {
+  static const drake::internal::WarnDeprecated warn_once(
+      "2038-01-19", "The method OldCalc() has been renamed to NewCalc().");
+  return NewCalc(data);
+}
+</pre> */
+class[[maybe_unused]] WarnDeprecated {
+ public:
+  /* The removal_date must be in the form YYYY-MM-DD. */
+  WarnDeprecated(std::string_view removal_date, std::string_view message);
+};
+
+}  // namespace internal
+}  // namespace drake

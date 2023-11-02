@@ -4,7 +4,6 @@
 
 #include <functional>
 #include <stdexcept>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -14,9 +13,7 @@
 
 using std::exception;
 using std::function;
-using std::is_same;
 using std::pair;
-using std::result_of;
 using std::vector;
 
 namespace drake {
@@ -332,10 +329,8 @@ TEST_F(SymbolicSubstitutionTest, CheckHomomorphismFormulaVarExpr) {
   fns.push_back([&](const Expression& x) { return !fns[15](x); });
   fns.push_back([&](const Expression& x) {
     Eigen::Matrix<Expression, 2, 2> m;
-    // clang-format off
     m << (x * y_), 2.0,
               2.0, (x * y_);
-    // clang-format on
     return positive_semidefinite(m);
   });
   // clang-format on

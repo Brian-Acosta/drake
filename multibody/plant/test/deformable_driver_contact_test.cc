@@ -1,3 +1,4 @@
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
@@ -5,6 +6,7 @@
 #include "drake/multibody/fem/matrix_utilities.h"
 #include "drake/multibody/plant/compliant_contact_manager.h"
 #include "drake/multibody/plant/deformable_driver.h"
+#include "drake/multibody/plant/multibody_plant.h"
 #include "drake/systems/framework/diagram_builder.h"
 
 using drake::geometry::GeometryId;
@@ -17,30 +19,18 @@ using drake::geometry::internal::DeformableContactSurface;
 using drake::math::RigidTransformd;
 using drake::multibody::contact_solvers::internal::ContactSolverResults;
 using drake::multibody::contact_solvers::internal::PartialPermutation;
+using drake::multibody::contact_solvers::internal::SchurComplement;
 using drake::multibody::fem::FemModel;
 using drake::multibody::fem::FemState;
-using drake::multibody::fem::internal::PetscSymmetricBlockSparseMatrix;
-using drake::multibody::fem::internal::SchurComplement;
 using drake::systems::Context;
 using drake::systems::DiscreteStateIndex;
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
 using std::make_unique;
-using std::move;
 
 namespace drake {
 namespace multibody {
 namespace internal {
-
-// Friend class used to provide access to a selection of private functions in
-// CompliantContactManager for testing purposes.
-class CompliantContactManagerTester {
- public:
-  static const DeformableDriver<double>* deformable_driver(
-      const CompliantContactManager<double>& manager) {
-    return manager.deformable_driver_.get();
-  }
-};
 
 /* This fixture tests DeformableDriver member functions associated with the
  concept of contact. In particular, it sets up two identical and overlapping
@@ -52,7 +42,6 @@ class CompliantContactManagerTester {
 class DeformableDriverContactTest : public ::testing::Test {
  protected:
   static constexpr double kDt = 0.001;
-  static constexpr double kPointContactStiffness = 1e6;
   static constexpr double kDissipationTimeScale = 0.1;
 
   void SetUp() override {
@@ -64,13 +53,12 @@ class DeformableDriverContactTest : public ::testing::Test {
     body_id1_ =
         RegisterDeformableOctahedron(deformable_model.get(), "deformable1");
     model_ = deformable_model.get();
-    plant_->AddPhysicalModel(move(deformable_model));
+    plant_->AddPhysicalModel(std::move(deformable_model));
     plant_->set_discrete_contact_solver(DiscreteContactSolver::kSap);
     /* Register a rigid collision geometry intersecting with the bottom half of
      the deformable octahedrons. */
     geometry::ProximityProperties proximity_prop;
-    geometry::AddContactMaterial({}, kPointContactStiffness,
-                                 CoulombFriction<double>(1.0, 1.0),
+    geometry::AddContactMaterial({}, {}, CoulombFriction<double>(1.0, 1.0),
                                  &proximity_prop);
     // TODO(xuchenhan-tri): Modify this when resolution hint is no longer used
     //  as the trigger for contact with deformable bodies.
@@ -84,8 +72,9 @@ class DeformableDriverContactTest : public ::testing::Test {
 
     auto contact_manager = make_unique<CompliantContactManager<double>>();
     manager_ = contact_manager.get();
-    plant_->SetDiscreteUpdateManager(move(contact_manager));
-    driver_ = CompliantContactManagerTester::deformable_driver(*manager_);
+    plant_->SetDiscreteUpdateManager(std::move(contact_manager));
+    driver_ = manager_->deformable_driver();
+    DRAKE_DEMAND(driver_ != nullptr);
 
     builder.Connect(model_->vertex_positions_port(),
                     scene_graph_->get_source_configuration_port(
@@ -133,13 +122,20 @@ class DeformableDriverContactTest : public ::testing::Test {
     return driver_->EvalParticipatingVelocityMultiplexer(context);
   }
 
-  const PetscSymmetricBlockSparseMatrix& EvalFreeMotionTangentMatrix(
-      const systems::Context<double>& context,
-      DeformableBodyIndex index) const {
-    return driver_->EvalFreeMotionTangentMatrix(context, index);
+  MatrixXd EvalFreeMotionTangentMatrix(const systems::Context<double>& context,
+                                       DeformableBodyIndex index) const {
+    DeformableBodyId body_id = model_->GetBodyId(index);
+    const FemModel<double>& fem_model = model_->GetFemModel(body_id);
+    std::unique_ptr<contact_solvers::internal::Block3x3SparseSymmetricMatrix>
+        fem_tangent_matrix = fem_model.MakeTangentMatrix();
+    const FemState<double>& free_motion_state =
+        EvalFreeMotionFemState(context, index);
+    fem_model.CalcTangentMatrix(free_motion_state, GetIntegratorWeights(),
+                                fem_tangent_matrix.get());
+    return fem_tangent_matrix->MakeDenseMatrix();
   }
 
-  const SchurComplement<double>& EvalFreeMotionTangentMatrixSchurComplement(
+  const SchurComplement& EvalFreeMotionTangentMatrixSchurComplement(
       const systems::Context<double>& context,
       DeformableBodyIndex index) const {
     return driver_->EvalFreeMotionTangentMatrixSchurComplement(context, index);
@@ -182,21 +178,21 @@ class DeformableDriverContactTest : public ::testing::Test {
   DeformableBodyId RegisterDeformableOctahedron(DeformableModel<double>* model,
                                                 std::string name) {
     auto geometry = make_unique<GeometryInstance>(
-        RigidTransformd(), make_unique<Sphere>(1.0), move(name));
+        RigidTransformd(), make_unique<Sphere>(1.0), std::move(name));
     geometry::ProximityProperties props;
-    geometry::AddContactMaterial({}, kPointContactStiffness,
-                                 CoulombFriction<double>(1.0, 1.0), &props);
+    geometry::AddContactMaterial({}, {}, CoulombFriction<double>(1.0, 1.0),
+                                 &props);
     props.AddProperty(geometry::internal::kMaterialGroup,
                       geometry::internal::kRelaxationTime,
                       kDissipationTimeScale);
-    geometry->set_proximity_properties(move(props));
+    geometry->set_proximity_properties(std::move(props));
     fem::DeformableBodyConfig<double> body_config;
     body_config.set_youngs_modulus(1e6);
     body_config.set_poissons_ratio(0.4);
     /* Make the resolution hint large enough so that we get an octahedron. */
     constexpr double kRezHint = 10.0;
-    DeformableBodyId body_id =
-        model->RegisterDeformableBody(move(geometry), body_config, kRezHint);
+    DeformableBodyId body_id = model->RegisterDeformableBody(
+        std::move(geometry), body_config, kRezHint);
     return body_id;
   }
 };
@@ -294,36 +290,13 @@ TEST_F(DeformableDriverContactTest, EvalParticipatingFreeMotionVelocities) {
             EvalParticipatingFreeMotionVelocities(plant_context));
 }
 
-TEST_F(DeformableDriverContactTest, EvalFreeMotionTangentMatrix) {
-  DeformableBodyIndex body_index(0);
-  const Context<double>& plant_context =
-      plant_->GetMyContextFromRoot(*context_);
-  const FemState<double>& free_motion_state =
-      EvalFreeMotionFemState(plant_context, body_index);
-  DeformableBodyId body_id = model_->GetBodyId(body_index);
-  const FemModel<double>& fem_model = model_->GetFemModel(body_id);
-  std::unique_ptr<PetscSymmetricBlockSparseMatrix> fem_tangent_matrix =
-      fem_model.MakePetscSymmetricBlockSparseTangentMatrix();
-  fem_model.CalcTangentMatrix(free_motion_state, GetIntegratorWeights(),
-                              fem_tangent_matrix.get());
-  fem_tangent_matrix->AssembleIfNecessary();
-  const MatrixXd expected_tangent_matrix =
-      fem_tangent_matrix->MakeDenseMatrix() * plant_->time_step();
-  const PetscSymmetricBlockSparseMatrix& calculated_tangent_matrix =
-      EvalFreeMotionTangentMatrix(plant_context, body_index);
-  EXPECT_TRUE(CompareMatrices(expected_tangent_matrix,
-                              calculated_tangent_matrix.MakeDenseMatrix(),
-                              1e-14, MatrixCompareType::relative));
-}
-
 TEST_F(DeformableDriverContactTest,
        EvalFreeMotionTangentMatrixSchurComplement) {
   DeformableBodyIndex body_index(0);
   const Context<double>& plant_context =
       plant_->GetMyContextFromRoot(*context_);
-  const PetscSymmetricBlockSparseMatrix& tangent_matrix =
+  const MatrixXd tangent_matrix =
       EvalFreeMotionTangentMatrix(plant_context, body_index);
-  const MatrixXd dense_tangent_matrix = tangent_matrix.MakeDenseMatrix();
   /* Schematically the participating block (A), the non-participating block (D),
    and the off-diagonal block (B) look like
                            _______________________________________
@@ -332,40 +305,38 @@ TEST_F(DeformableDriverContactTest,
    with vertices 0-4) are  |                       |      |      |
    participating.          |                       |      |      |
                            |                       |      |      |
-                           |           A           |   B  |   A  |
+                           |           A           |  Bᵀ  |   A  |
                            |                       |      |      |
                            |                       |      |      |
                            |                       |      |      |
                            |                       |      |      |
                            |_______________________|______|______|
    Dofs 15-17 (associated  |                       |      |      |
-   with vertex 5) are not  |                       |   D  |      |
+   with vertex 5) are not  |           B           |   D  |   B  |
    participating.          |_______________________|______|______|
    Dofs 18-20 (associated  |                       |      |      |
-   with vertex 6) are      |           A           |   B  |   A  |
+   with vertex 6) are      |           A           |  Bᵀ  |   A  |
    participating.          |_______________________|______|______|       */
   /* Matrix block for participating dofs. */
   const int num_participating_vertices = 6;
   const int num_participating_dofs = num_participating_vertices * 3;
   MatrixXd A = MatrixXd::Zero(num_participating_dofs, num_participating_dofs);
   /* Vertices 0, 1, 2, 3, 4, 6 are participating in contact. */
-  A.topLeftCorner(15, 15) = dense_tangent_matrix.topLeftCorner(15, 15);
-  A.topRightCorner(15, 3) = dense_tangent_matrix.topRightCorner(15, 3);
-  A.bottomLeftCorner(3, 15) = dense_tangent_matrix.bottomLeftCorner(3, 15);
-  A.bottomRightCorner(3, 3) = dense_tangent_matrix.bottomRightCorner(3, 3);
+  A.topLeftCorner(15, 15) = tangent_matrix.topLeftCorner(15, 15);
+  A.topRightCorner(15, 3) = tangent_matrix.topRightCorner(15, 3);
+  A.bottomLeftCorner(3, 15) = tangent_matrix.bottomLeftCorner(3, 15);
+  A.bottomRightCorner(3, 3) = tangent_matrix.bottomRightCorner(3, 3);
   /* Matrix block for non-participating dofs. */
   const int num_nonparticipating_vertices = 1;
   const int num_nonparticipating_dofs = num_nonparticipating_vertices * 3;
-  MatrixXd D = dense_tangent_matrix.block<3, 3>(15, 15);
+  MatrixXd D = tangent_matrix.block<3, 3>(15, 15);
   /* Off diagonal block. */
   MatrixXd B =
-      MatrixXd::Zero(num_participating_dofs, num_nonparticipating_dofs);
-  B.topRows(15) = dense_tangent_matrix.block<15, 3>(0, 15);
-  B.bottomRows(3) = dense_tangent_matrix.block<3, 3>(18, 15);
+      MatrixXd::Zero(num_nonparticipating_dofs, num_participating_dofs);
+  B.leftCols(15) = tangent_matrix.block<3, 15>(15, 0);
+  B.rightCols(3) = tangent_matrix.block<3, 3>(15, 18);
   const MatrixXd expected_complement_matrix =
-      SchurComplement<double>(A.sparseView(), B.transpose().sparseView(),
-                              D.sparseView())
-          .get_D_complement();
+      A - B.transpose() * D.llt().solve(B);
   EXPECT_TRUE(CompareMatrices(
       expected_complement_matrix,
       EvalFreeMotionTangentMatrixSchurComplement(plant_context, body_index)
@@ -383,16 +354,18 @@ TEST_F(DeformableDriverContactTest, AppendLinearDynamicsMatrix) {
   DeformableBodyIndex body_index1(1);
   EXPECT_EQ(A[0], EvalFreeMotionTangentMatrixSchurComplement(plant_context,
                                                              body_index0)
-                      .get_D_complement());
+                          .get_D_complement() *
+                      plant_->time_step());
   EXPECT_EQ(A[1], EvalFreeMotionTangentMatrixSchurComplement(plant_context,
                                                              body_index1)
-                      .get_D_complement());
+                          .get_D_complement() *
+                      plant_->time_step());
 }
 
 TEST_F(DeformableDriverContactTest, AppendDiscreteContactPairs) {
   const Context<double>& plant_context =
       plant_->GetMyContextFromRoot(*context_);
-  std::vector<DiscreteContactPair<double>> contact_pairs;
+  DiscreteContactData<DiscreteContactPair<double>> contact_pairs;
   driver_->AppendDiscreteContactPairs(plant_context, &contact_pairs);
 
   const DeformableContact<double>& contact_data =
@@ -407,11 +380,23 @@ TEST_F(DeformableDriverContactTest, AppendDiscreteContactPairs) {
   /* tau for deformable body is set to kDissipationTimeScale and is unset for
    rigid body (which then assumes the default value, dt). */
   constexpr double expected_tau = kDissipationTimeScale + kDt;
-  constexpr double expected_k = kPointContactStiffness / 2.0;
+  /* Stiffness is set to infinity for deformable contact pairs. */
+  constexpr double expected_k = std::numeric_limits<double>::infinity();
   GeometryId id0 = model_->GetGeometryId(body_id0_);
   GeometryId id1 = model_->GetGeometryId(body_id1_);
 
-  for (const DiscreteContactPair<double>& pair : contact_pairs) {
+  /* The set of face indices for each contact surface should be
+   {0, 1, ..., num_contact_points - 1}. */
+  std::set<int> face_indices_0;
+  std::set<int> face_indices_1;
+  std::set<int> expected_face_indices;
+  for (int i = 0; i < contact_data.contact_surfaces()[0].num_contact_points();
+       ++i) {
+    expected_face_indices.insert(i);
+  }
+
+  for (int i = 0; i < contact_pairs.size(); ++i) {
+    const DiscreteContactPair<double>& pair = contact_pairs[i];
     EXPECT_TRUE(pair.id_A == id0 || pair.id_A == id1);
     EXPECT_EQ(pair.id_B, rigid_geometry_id_);
     /* The contact point is on the z = -0.25 plane, the top surface of the rigid
@@ -421,7 +406,21 @@ TEST_F(DeformableDriverContactTest, AppendDiscreteContactPairs) {
     EXPECT_EQ(pair.stiffness, expected_k);
     EXPECT_EQ(pair.dissipation_time_scale, expected_tau);
     EXPECT_EQ(pair.friction_coefficient, 1.0);
+    ASSERT_TRUE(pair.surface_index.has_value());
+    ASSERT_TRUE(pair.face_index.has_value());
+    /* There are two contact surfaces, one between the rigid box and the 0-th
+     deformable octahedron, and the other between the rigid box and the 1st
+     deformable octahedron. We don't know the order they come into
+     `contact_pairs`, but we do know the surface index is either 0 or 1. */
+    EXPECT_THAT(pair.surface_index.value(), testing::AnyOf(0, 1));
+    if (pair.id_A == id0) {
+      face_indices_0.insert(pair.face_index.value());
+    } else {
+      face_indices_1.insert(pair.face_index.value());
+    }
   }
+  EXPECT_EQ(face_indices_0, expected_face_indices);
+  EXPECT_EQ(face_indices_1, expected_face_indices);
 }
 
 /* Verifies that the post contact velocites for deformable bodies are as
@@ -446,10 +445,11 @@ TEST_F(DeformableDriverContactTest, CalcNextFemStateWithContact) {
   const VectorXd& v_next =
       EvalNextFemState(plant_context, DeformableBodyIndex(0)).GetVelocities();
 
-  /* Build A. */
+  /* Build A, the tangent matrix of the momentum balance equation (thus the
+   factor of dt). */
   const MatrixXd A =
-      EvalFreeMotionTangentMatrix(plant_context, DeformableBodyIndex(0))
-          .MakeDenseMatrix();
+      EvalFreeMotionTangentMatrix(plant_context, DeformableBodyIndex(0)) *
+      plant_->time_step();
 
   /* Build tau. */
   const ContactSolverResults<double>& solver_results =

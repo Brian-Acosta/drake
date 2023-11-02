@@ -13,12 +13,12 @@
 #include "drake/common/find_resource.h"
 #include "drake/common/find_runfiles.h"
 #include "drake/common/temp_directory.h"
+#include "drake/common/test_utilities/diagnostic_policy_test_base.h"
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
 #include "drake/common/test_utilities/expect_no_throw.h"
 #include "drake/common/test_utilities/expect_throws_message.h"
 #include "drake/geometry/geometry_roles.h"
 #include "drake/multibody/parsing/detail_path_utils.h"
-#include "drake/multibody/parsing/test/diagnostic_policy_test_base.h"
 #include "drake/multibody/tree/ball_rpy_joint.h"
 #include "drake/multibody/tree/linear_bushing_roll_pitch_yaw.h"
 #include "drake/multibody/tree/planar_joint.h"
@@ -1207,7 +1207,7 @@ TEST_F(UrdfParserTest, PointMass) {
   EXPECT_TRUE(body.default_rotational_inertia().get_products().isZero());
 }
 
-TEST_F(UrdfParserTest, BadInertia) {
+TEST_F(UrdfParserTest, BadInertiaFormats) {
   // Test various mis-formatted inputs.
   constexpr const char* base = R"""(
     <robot name='point_mass'>
@@ -1246,38 +1246,6 @@ TEST_F(UrdfParserTest, BadInertia) {
       fmt::format(base, "value='1'",
                   "ixx='0' ixy='0' ixz='0' iyy='0' iyz='0' izz='0 2 3'"), "f");
   EXPECT_THAT(TakeError(), MatchesRegex(".*Expected single value.*izz.*"));
-}
-
-// TODO(rpoyner-tri): these tests don't test the parser but rather error
-// behavior of underlying implementation components. Consider moving or
-// removing them.
-class ZeroMassNonZeroInertiaTest : public UrdfParserTest {
- public:
-  void ParseZeroMassNonZeroInertia() {
-    AddModelFromUrdfString(R"""(
-<robot name='bad'>
-  <link name='bad'>
-    <inertial>
-      <mass value="0"/>
-      <inertia ixx="1" ixy="0" ixz="0" iyy="1" iyz="0" izz="1"/>
-    </inertial>
-  </link>
-</robot>)""", "");
-  }
-};
-
-TEST_F(ZeroMassNonZeroInertiaTest, ExceptionType) {
-  // Test that attempt to parse links with zero mass and non-zero inertia fails.
-  if (!::drake::kDrakeAssertIsArmed) {
-    EXPECT_THROW(ParseZeroMassNonZeroInertia(), std::runtime_error);
-  }
-}
-
-TEST_F(ZeroMassNonZeroInertiaTest, Message) {
-  // Test that attempt to parse links with zero mass and non-zero inertia fails.
-  const std::string expected_message = ".*condition 'mass > 0' failed.";
-  DRAKE_EXPECT_THROWS_MESSAGE(
-      ParseZeroMassNonZeroInertia(), expected_message);
 }
 
 TEST_F(UrdfParserTest, BushingParsing) {
@@ -1429,6 +1397,115 @@ TEST_F(UrdfParserTest, BushingMissingValueAttribute) {
   EXPECT_THAT(TakeError(), MatchesRegex(
                   ".*Unable to read the 'value' attribute for the"
                   " <drake:bushing_torque_stiffness> tag"));
+}
+
+class BallConstraintTest : public UrdfParserTest {
+ public:
+  BallConstraintTest() {
+    // TODO(joemasterjohn): Currently ball constraints are only supported in
+    // SAP.
+    // Add coverage for other solvers and continuous mode when available.
+    plant_.set_discrete_contact_solver(DiscreteContactSolver::kSap);
+  }
+
+  void VerifyParameters(const std::string& body_A, const std::string& body_B,
+                        const Vector3d& p_AP, const Vector3d& p_BQ) {
+    std::string text = fmt::format(
+        kTestString,
+        fmt::format("<drake:ball_constraint_body_A name=\"{}\"/>", body_A),
+        fmt::format("<drake:ball_constraint_body_B name=\"{}\"/>", body_B),
+        fmt::format("<drake:ball_constraint_p_AP value=\"{} {} {}\"/>",
+                    p_AP.x(), p_AP.y(), p_AP.z()),
+        fmt::format("<drake:ball_constraint_p_BQ value=\"{} {} {}\"/>",
+                    p_BQ.x(), p_BQ.y(), p_BQ.z()));
+    EXPECT_NE(AddModelFromUrdfString(text, ""), std::nullopt);
+
+    const std::map<MultibodyConstraintId, BallConstraintSpec>&
+        ball_constraints = plant_.get_ball_constraint_specs();
+    ASSERT_EQ(ssize(ball_constraints), 1);
+
+    const MultibodyConstraintId ball_id = ball_constraints.begin()->first;
+    const BallConstraintSpec& ball_spec = ball_constraints.begin()->second;
+
+    EXPECT_EQ(ball_id, ball_spec.id);
+    EXPECT_EQ(ball_spec.body_A, plant_.GetBodyByName(body_A).index());
+    EXPECT_EQ(ball_spec.body_B, plant_.GetBodyByName(body_B).index());
+    EXPECT_EQ(ball_spec.p_AP, p_AP);
+    EXPECT_EQ(ball_spec.p_BQ, p_BQ);
+  }
+
+  void ProvokeError(const std::optional<const std::string>& body_A,
+                    const std::optional<const std::string>& body_B,
+                    const std::optional<const Vector3d>& p_AP,
+                    const std::optional<const Vector3d>& p_BQ,
+                    const std::string& error_pattern) {
+    std::string text = fmt::format(
+        kTestString,
+        body_A.has_value()
+            ? fmt::format("<drake:ball_constraint_body_A name=\"{}\"/>",
+                          body_A.value())
+            : "",
+        body_B.has_value()
+            ? fmt::format("<drake:ball_constraint_body_B name=\"{}\"/>",
+                          body_B.value())
+            : "",
+        p_AP.has_value()
+            ? fmt::format("<drake:ball_constraint_p_AP value=\"{} {} {}\"/>",
+                          p_AP.value().x(), p_AP.value().y(), p_AP.value().z())
+            : "",
+        p_BQ.has_value()
+            ? fmt::format("<drake:ball_constraint_p_BQ value=\"{} {} {}\"/>",
+                          p_BQ.value().x(), p_BQ.value().y(), p_BQ.value().z())
+            : "");
+    EXPECT_NE(AddModelFromUrdfString(text, ""), std::nullopt);
+    EXPECT_THAT(TakeError(), MatchesRegex(error_pattern));
+  }
+
+ protected:
+  // Common URDF string with format options for the two custom tags.
+  static constexpr const char* kTestString = R"""(
+    <robot name='ball_constraint_test'>
+      <link name='A'/>
+      <link name='B'/>
+      <drake:ball_constraint>
+        {0}
+        {1}
+        {2}
+        {3}
+      </drake:ball_constraint>
+    </robot>)""";
+};
+
+TEST_F(BallConstraintTest, AllParameters) {
+  // Test successful parsing of all parameters.
+  VerifyParameters("A", "B", Vector3d(1, 2, 3), Vector3d(4, 5, 6));
+}
+
+TEST_F(BallConstraintTest, MissingBodyA) {
+  ProvokeError({}, "B", Vector3d(1, 2, 3), Vector3d(4, 5, 6),
+               ".*Unable to find the <drake:ball_constraint_body_A> tag");
+}
+
+TEST_F(BallConstraintTest, MissingBodyB) {
+  ProvokeError("A", {}, Vector3d(1, 2, 3), Vector3d(4, 5, 6),
+               ".*Unable to find the <drake:ball_constraint_body_B> tag");
+}
+
+TEST_F(BallConstraintTest, Missing_p_AP) {
+  ProvokeError("A", "B", {}, Vector3d(4, 5, 6),
+               ".*Unable to find the <drake:ball_constraint_p_AP> tag");
+}
+
+TEST_F(BallConstraintTest, Missing_p_BQ) {
+  ProvokeError("A", "B", Vector3d(1, 2, 3), {},
+               ".*Unable to find the <drake:ball_constraint_p_BQ> tag");
+}
+
+TEST_F(BallConstraintTest, InvalidBody) {
+  ProvokeError(
+      "INVALID", "B", Vector3d(1, 2, 3), Vector3d(4, 5, 6),
+      ".*Body: INVALID specified for <drake:ball_constraint_body_A> does not"
+      " exist in the model.");
 }
 
 class ReflectedInertiaTest : public UrdfParserTest {
@@ -1794,6 +1871,59 @@ TEST_F(UrdfParserTest, UnsupportedMechanicalReductionIgnoredMaybe) {
       EXPECT_THAT(TakeWarning(), MatchesRegex(pattern));
     }
   }
+}
+
+TEST_F(UrdfParserTest, PlanarJointAxisRespected) {
+  constexpr const char* model = R"""(
+    <robot name='a'>
+      <link name="link1"/>
+      <link name="link2"/>
+      <drake:joint name="planar_joint" type="planar">
+        <parent link="link1"/>
+        <child link="link2"/>
+        <axis xyz = "0 1 0" />
+      </drake:joint>
+    </robot>)""";
+  EXPECT_NE(AddModelFromUrdfString(model, ""), std::nullopt);
+  plant_.Finalize();
+  plant_.GetMutableJointByName<PlanarJoint>("planar_joint")
+      .set_default_translation(Vector2<double>(1.2, 3.4));
+  auto context = plant_.CreateDefaultContext();
+  const math::RigidTransform<double>& X_WB =
+      plant_.EvalBodyPoseInWorld(*context, plant_.GetBodyByName("link2"));
+  const Vector3d p_WB_F(1.2, 3.4, 0.0);
+  // The rotation that aligns +Mz with +By is the right-handed rotation around
+  // Bx by 270 degrees.
+  const math::RotationMatrixd R_BM =
+      math::RotationMatrixd::MakeXRotation(3 * M_PI_2);
+  // R_WB and R_MF are both identities.
+  const math::RotationMatrixd R_WF = R_BM;
+  const Vector3d p_WB = R_WF * p_WB_F;
+  EXPECT_TRUE(CompareMatrices(X_WB.translation(), p_WB,
+              4.0 * std::numeric_limits<double>::epsilon()));
+}
+
+TEST_F(UrdfParserTest, PlanarJointCanonicalFrame) {
+  constexpr const char* model = R"""(
+    <robot name='a'>
+      <link name="link1"/>
+      <link name="link2"/>
+      <drake:joint name="planar_joint" type="planar">
+        <parent link="link1"/>
+        <child link="link2"/>
+        <axis xyz = "0 0 1" />
+      </drake:joint>
+    </robot>)""";
+  EXPECT_NE(AddModelFromUrdfString(model, ""), std::nullopt);
+  plant_.Finalize();
+  plant_.GetMutableJointByName<PlanarJoint>("planar_joint")
+      .set_default_translation(Vector2<double>(1.2, 3.4));
+  auto context = plant_.CreateDefaultContext();
+  const math::RigidTransform<double>& X_WB =
+      plant_.EvalBodyPoseInWorld(*context, plant_.GetBodyByName("link2"));
+  // When the joint axis is (0, 0, 1), we shouldn't flip the x and y axes.
+  const Vector3d expected_translation(1.2, 3.4, 0);
+  EXPECT_EQ(X_WB.translation(), expected_translation);
 }
 
 }  // namespace

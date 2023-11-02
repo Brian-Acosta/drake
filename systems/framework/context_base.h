@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "drake/common/reset_on_copy.h"
+#include "drake/common/ssize.h"
 #include "drake/common/unused.h"
 #include "drake/common/value.h"
 #include "drake/systems/framework/cache.h"
@@ -181,12 +182,12 @@ class ContextBase : public internal::ContextMessageInterface {
   /** Returns the number of input ports in this context. */
   int num_input_ports() const {
     DRAKE_ASSERT(input_port_tickets_.size() == input_port_values_.size());
-    return static_cast<int>(input_port_tickets_.size());
+    return ssize(input_port_tickets_);
   }
 
   /** Returns the number of output ports represented in this context. */
   int num_output_ports() const {
-    return static_cast<int>(output_port_tickets_.size());
+    return ssize(output_port_tickets_);
   }
 
   /** Returns the dependency ticket associated with a particular input port. */
@@ -254,6 +255,19 @@ class ContextBase : public internal::ContextMessageInterface {
 
   /** Returns true if this context has no parent. */
   bool is_root_context() const { return parent_ == nullptr; }
+
+#ifndef DRAKE_DOXYGEN_CXX
+  // (Internal use only) Provides a mutable flag for use in deprecating
+  // user-overrideable virtuals in Drake code that only has access to a const
+  // Context. There is no explicit thread safety provided, but this can be used
+  // in a thread-safe manner as long as Contexts are not shared among threads.
+  void set_use_default_implementation(bool value) const {
+    use_default_implementation_ = value;
+  }
+  bool get_use_default_implementation() const {
+    return use_default_implementation_;
+  }
+#endif
 
  protected:
   /** Default constructor creates an empty ContextBase but initializes all the
@@ -652,6 +666,9 @@ class ContextBase : public internal::ContextMessageInterface {
   // const Context.
   // Note that it does *not* get reset when copied.
   mutable int64_t current_change_event_{0};
+
+  // A writable flag for use in deprecating user-overrideable virtuals.
+  mutable bool use_default_implementation_{false};
 
   // This is the dependency graph for values within this subcontext.
   DependencyGraph graph_;

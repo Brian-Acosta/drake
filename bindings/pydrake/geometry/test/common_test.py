@@ -7,7 +7,6 @@ import unittest
 import numpy as np
 
 from pydrake.common.test_utilities import numpy_compare
-from pydrake.common.test_utilities.deprecation import catch_drake_warnings
 from pydrake.common.test_utilities.pickle_compare import assert_pickle
 from pydrake.common.value import AbstractValue, Value
 from pydrake.common.yaml import yaml_load_typed
@@ -69,7 +68,6 @@ class TestGeometryCore(unittest.TestCase):
         geometry.set_pose(RigidTransform([1, 0, 0]))
         self.assertIsInstance(geometry.pose(), RigidTransform)
         self.assertIsInstance(geometry.shape(), mut.Shape)
-        self.assertIsInstance(geometry.release_shape(), mut.Shape)
         self.assertEqual(geometry.name(), "sphere")
         geometry.set_name("funky")
         self.assertEqual(geometry.name(), "funky")
@@ -317,6 +315,10 @@ class TestGeometryCore(unittest.TestCase):
         self.assertEqual(color, mut.Rgba(1.0, 1.0, 1.0, 0.0))
         color.set(rgba=[0.75, 0.5, 0.25])
         self.assertEqual(color, mut.Rgba(0.75, 0.5, 0.25, 1.0))
+        color.update(a=0.5)
+        self.assertEqual(color, mut.Rgba(0.75, 0.5, 0.25, 0.5))
+        color.update(r=0.1, g=0.2, b=0.3)
+        self.assertEqual(color, mut.Rgba(0.1, 0.2, 0.3, 0.5))
 
         # Property read/write.
         color.rgba = [0.1, 0.2, 0.3, 0.4]
@@ -339,6 +341,10 @@ class TestGeometryCore(unittest.TestCase):
             color.rgba = [1.0] * 2
         with self.assertRaisesRegex(RuntimeError, ".*3 or 4.*"):
             color.rgba = [1.0] * 5
+
+        # Modulation.
+        self.assertIsInstance(color * mut.Rgba(0.5, 0.5, 0.5), mut.Rgba)
+        self.assertIsInstance(color.scale_rgb(0.5), mut.Rgba)
 
         # Confirm value instantiation.
         Value[mut.Rgba]
@@ -388,9 +394,6 @@ class TestGeometryCore(unittest.TestCase):
             shape_copy = shape.Clone()
             self.assertIsInstance(shape_copy, shape_cls)
             self.assertIsNot(shape, shape_copy)
-        with catch_drake_warnings(expected_count=2):
-            mut.Mesh(absolute_filename="arbitrary/path", scale=1.0),
-            mut.Convex(absolute_filename="arbitrary/path", scale=1.0),
 
     def test_shapes(self):
         # We'll test some invariants on all shapes as inherited from the Shape
@@ -424,10 +427,11 @@ class TestGeometryCore(unittest.TestCase):
         assert_pickle(
             self, capsule, lambda shape: [shape.radius(), shape.length()])
 
-        junk_path = "arbitrary/path"
+        junk_path = "arbitrary/path.ext"
         convex = mut.Convex(filename=junk_path, scale=1.0)
         assert_shape_api(convex)
         self.assertIn(junk_path, convex.filename())
+        self.assertEqual(".ext", convex.extension())
         self.assertEqual(convex.scale(), 1.0)
         assert_pickle(
             self, convex, lambda shape: [shape.filename(), shape.scale()])
@@ -455,6 +459,7 @@ class TestGeometryCore(unittest.TestCase):
         mesh = mut.Mesh(filename=junk_path, scale=1.0)
         assert_shape_api(mesh)
         self.assertIn(junk_path, mesh.filename())
+        self.assertEqual(".ext", mesh.extension())
         self.assertEqual(mesh.scale(), 1.0)
         assert_pickle(
             self, mesh, lambda shape: [shape.filename(), shape.scale()])

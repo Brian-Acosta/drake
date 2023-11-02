@@ -229,7 +229,7 @@ size_t EvaluateConstraint(const MathematicalProgram& prog,
   // constraints.
   if constexpr (std::is_same_v<ConstraintType, LinearEqualityConstraint> ||
                 std::is_same_v<ConstraintType, LinearConstraint>) {
-    auto A = static_cast<ConstraintType*>(c)->GetDenseA();
+    auto A = static_cast<ConstraintType*>(c)->get_sparse_A();
     // Verify that A has the proper size.
     DRAKE_ASSERT(A.rows() == c->num_constraints());
     DRAKE_ASSERT(A.cols() == binding.variables().rows());
@@ -619,7 +619,7 @@ class IpoptSolver_NLP : public Ipopt::TNLP {
     SetAllConstraintDualSolution(*problem_, solver_details.lambda,
                                  constraint_dual_start_index_, result_);
 
-    result_->set_solution_result(SolutionResult::kUnknownError);
+    result_->set_solution_result(SolutionResult::kSolverSpecificError);
     switch (status) {
       case Ipopt::SUCCESS: {
         result_->set_solution_result(SolutionResult::kSolutionFound);
@@ -649,7 +649,7 @@ class IpoptSolver_NLP : public Ipopt::TNLP {
         break;
       }
       default: {
-        result_->set_solution_result(SolutionResult::kUnknownError);
+        result_->set_solution_result(SolutionResult::kSolverSpecificError);
         break;
       }
     }

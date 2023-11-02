@@ -4,8 +4,6 @@
  pydrake.geometry module. */
 
 #include "drake/bindings/pydrake/common/default_scalars_pybind.h"
-#include "drake/bindings/pydrake/common/deprecation_pybind.h"
-#include "drake/bindings/pydrake/common/monostate_pybind.h"
 #include "drake/bindings/pydrake/common/type_pack.h"
 #include "drake/bindings/pydrake/common/value_pybind.h"
 #include "drake/bindings/pydrake/documentation_pybind.h"
@@ -52,9 +50,9 @@ void DoScalarDependentDefinitions(py::module m, T) {
     cls  // BR
          // Scene-graph wide data.
         .def("num_sources", &Class::num_sources, cls_doc.num_sources.doc)
-        .def("num_frames", &Class::num_frames, cls_doc.num_frames.doc);
-
-    cls  // BR
+        .def("num_frames", &Class::num_frames, cls_doc.num_frames.doc)
+        .def("GetAllSourceIds", &Class::GetAllSourceIds,
+            cls_doc.GetAllSourceIds.doc)
         .def("GetAllFrameIds", &Class::GetAllFrameIds,
             cls_doc.GetAllFrameIds.doc)
         .def("world_frame_id", &Class::world_frame_id,
@@ -132,20 +130,7 @@ void DoScalarDependentDefinitions(py::module m, T) {
             py_rvp::reference_internal, py::arg("geometry_id"),
             cls_doc.GetName.doc_1args_geometry_id)
         .def("GetShape", &Class::GetShape, py_rvp::reference_internal,
-            py::arg("geometry_id"), cls_doc.GetShape.doc);
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    // 2023-04-01 Deprecation removal.
-    cls  // BR
-        .def("GetPoseInParent",
-            WrapDeprecated(cls_doc.GetPoseInParent.doc_deprecated,
-                &Class::GetPoseInParent),
-            py_rvp::reference_internal, py::arg("geometry_id"),
-            cls_doc.GetPoseInParent.doc_deprecated);
-#pragma GCC diagnostic pop
-
-    cls  // BR
+            py::arg("geometry_id"), cls_doc.GetShape.doc)
         .def("GetPoseInFrame", &Class::GetPoseInFrame,
             py_rvp::reference_internal, py::arg("geometry_id"),
             cls_doc.GetPoseInFrame.doc)
@@ -205,32 +190,13 @@ void DoScalarDependentDefinitions(py::module m, T) {
                 &Class::RegisterFrame),
             py::arg("source_id"), py::arg("parent_id"), py::arg("frame"),
             cls_doc.RegisterFrame.doc_3args)
+        .def("RenameFrame", &Class::RenameFrame, py::arg("frame_id"),
+            py::arg("name"), cls_doc.RenameFrame.doc)
         .def("RegisterGeometry",
             py::overload_cast<SourceId, FrameId,
                 std::unique_ptr<GeometryInstance>>(&Class::RegisterGeometry),
             py::arg("source_id"), py::arg("frame_id"), py::arg("geometry"),
-            cls_doc.RegisterGeometry.doc_3args);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    // 2023-04-01 Deprecation removal.
-    cls  // BR
-        .def("RegisterGeometry",
-            WrapDeprecated(cls_doc.RegisterGeometry.doc_deprecated_3args,
-                py::overload_cast<SourceId, GeometryId,
-                    std::unique_ptr<GeometryInstance>>(
-                    &Class::RegisterGeometry)),
-            py::arg("source_id"), py::arg("geometry_id"), py::arg("geometry"),
-            cls_doc.RegisterGeometry.doc_deprecated_3args)
-        .def("RegisterGeometry",
-            overload_cast_explicit<GeometryId, systems::Context<T>*, SourceId,
-                GeometryId, std::unique_ptr<GeometryInstance>>(
-                &Class::RegisterGeometry),
-            py::arg("context"), py::arg("source_id"), py::arg("geometry_id"),
-            py::arg("geometry"),
-            cls_doc.RegisterGeometry
-                .doc_4args_context_source_id_geometry_id_geometry);
-#pragma GCC diagnostic pop
-    cls  // BR
+            cls_doc.RegisterGeometry.doc_3args)
         .def("RegisterGeometry",
             overload_cast_explicit<GeometryId, systems::Context<T>*, SourceId,
                 FrameId, std::unique_ptr<GeometryInstance>>(
@@ -242,6 +208,22 @@ void DoScalarDependentDefinitions(py::module m, T) {
                 &Class::RegisterAnchoredGeometry),
             py::arg("source_id"), py::arg("geometry"),
             cls_doc.RegisterAnchoredGeometry.doc)
+        .def("RenameGeometry", &Class::RenameGeometry, py::arg("geometry_id"),
+            py::arg("name"), cls_doc.RenameGeometry.doc)
+        .def("ChangeShape",
+            py::overload_cast<SourceId, GeometryId, const Shape&,
+                std::optional<math::RigidTransform<double>>>(
+                &Class::ChangeShape),
+            py::arg("source_id"), py::arg("geometry_id"), py::arg("shape"),
+            py::arg("X_FG") = std::nullopt, cls_doc.ChangeShape.doc_model)
+        .def("ChangeShape",
+            overload_cast_explicit<void, systems::Context<T>*, SourceId,
+                GeometryId, const Shape&,
+                std::optional<math::RigidTransform<double>>>(
+                &Class::ChangeShape),
+            py::arg("context"), py::arg("source_id"), py::arg("geometry_id"),
+            py::arg("shape"), py::arg("X_FG") = std::nullopt,
+            cls_doc.ChangeShape.doc_context)
         .def("RemoveGeometry",
             py::overload_cast<SourceId, GeometryId>(&Class::RemoveGeometry),
             py::arg("source_id"), py::arg("geometry_id"),
@@ -259,11 +241,48 @@ void DoScalarDependentDefinitions(py::module m, T) {
             overload_cast_explicit<CollisionFilterManager>(
                 &Class::collision_filter_manager),
             cls_doc.collision_filter_manager.doc_0args)
-        .def("AddRenderer", &Class::AddRenderer, py::arg("name"),
-            py::arg("renderer"), cls_doc.AddRenderer.doc)
-        .def("HasRenderer", &Class::HasRenderer, py::arg("name"),
-            cls_doc.HasRenderer.doc)
-        .def("RendererCount", &Class::RendererCount, cls_doc.RendererCount.doc)
+        .def("AddRenderer",
+            overload_cast_explicit<void, std::string,
+                std::unique_ptr<render::RenderEngine>>(&Class::AddRenderer),
+            py::arg("name"), py::arg("renderer"), cls_doc.AddRenderer.doc_2args)
+        .def("AddRenderer",
+            overload_cast_explicit<void, systems::Context<T>*, std::string,
+                std::unique_ptr<render::RenderEngine>>(&Class::AddRenderer),
+            py::arg("context"), py::arg("name"), py::arg("renderer"),
+            cls_doc.AddRenderer.doc_3args)
+        .def("RemoveRenderer",
+            overload_cast_explicit<void, const std::string&>(
+                &Class::RemoveRenderer),
+            py::arg("name"), cls_doc.RemoveRenderer.doc_1args)
+        .def("RemoveRenderer",
+            overload_cast_explicit<void, systems::Context<T>*,
+                const std::string&>(&Class::RemoveRenderer),
+            py::arg("context"), py::arg("name"),
+            cls_doc.RemoveRenderer.doc_2args)
+        .def("HasRenderer",
+            overload_cast_explicit<bool, const std::string&>(
+                &Class::HasRenderer),
+            py::arg("name"), cls_doc.HasRenderer.doc_1args)
+        .def("HasRenderer",
+            overload_cast_explicit<bool, const systems::Context<T>&,
+                const std::string&>(&Class::HasRenderer),
+            py::arg("context"), py::arg("name"), cls_doc.HasRenderer.doc_2args)
+        .def("RendererCount",
+            overload_cast_explicit<int>(&Class::RendererCount),
+            cls_doc.RendererCount.doc_0args)
+        .def("RendererCount",
+            overload_cast_explicit<int, const systems::Context<T>&>(
+                &Class::RendererCount),
+            py::arg("context"), cls_doc.RendererCount.doc_1args)
+        .def("GetRendererTypeName",
+            overload_cast_explicit<std::string, const std::string&>(
+                &Class::GetRendererTypeName),
+            py::arg("name"), cls_doc.GetRendererTypeName.doc_1args)
+        .def("GetRendererTypeName",
+            overload_cast_explicit<std::string, const systems::Context<T>&,
+                const std::string&>(&Class::GetRendererTypeName),
+            py::arg("context"), py::arg("name"),
+            cls_doc.GetRendererTypeName.doc_2args)
         // - Begin: AssignRole Overloads.
         // - - Proximity.
         .def(

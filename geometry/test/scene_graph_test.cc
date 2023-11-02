@@ -235,14 +235,8 @@ TEST_F(SceneGraphTest, TopologyAfterAllocation) {
       scene_graph_.RegisterFrame(id, GeometryFrame("parent"));
   FrameId child_frame_id =
       scene_graph_.RegisterFrame(id, parent_frame_id, GeometryFrame("child"));
-  GeometryId parent_geometry_id = scene_graph_.RegisterGeometry(
+  GeometryId geometry_id = scene_graph_.RegisterGeometry(
       id, parent_frame_id, make_sphere_instance());
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  // 2023-04-01 Deprecation removal; delete all references to child_geometry_id.
-  GeometryId child_geometry_id = scene_graph_.RegisterGeometry(
-      id, parent_geometry_id, make_sphere_instance());
-#pragma GCC diagnostic pop
   GeometryId anchored_id =
       scene_graph_.RegisterAnchoredGeometry(id, make_sphere_instance());
   scene_graph_.RemoveGeometry(id, old_geometry_id);
@@ -256,8 +250,7 @@ TEST_F(SceneGraphTest, TopologyAfterAllocation) {
   // respectively.
   EXPECT_TRUE(model_inspector.BelongsToSource(parent_frame_id, id));
   EXPECT_TRUE(model_inspector.BelongsToSource(child_frame_id, id));
-  EXPECT_TRUE(model_inspector.BelongsToSource(parent_geometry_id, id));
-  EXPECT_TRUE(model_inspector.BelongsToSource(child_geometry_id, id));
+  EXPECT_TRUE(model_inspector.BelongsToSource(geometry_id, id));
   EXPECT_TRUE(model_inspector.BelongsToSource(anchored_id, id));
   // Removed geometry from SceneGraph; "invalid" id throws.
   EXPECT_THROW(model_inspector.BelongsToSource(old_geometry_id, id),
@@ -267,9 +260,7 @@ TEST_F(SceneGraphTest, TopologyAfterAllocation) {
                std::logic_error);
   EXPECT_THROW(context_inspector.BelongsToSource(child_frame_id, id),
                std::logic_error);
-  EXPECT_THROW(context_inspector.BelongsToSource(parent_geometry_id, id),
-               std::logic_error);
-  EXPECT_THROW(context_inspector.BelongsToSource(child_geometry_id, id),
+  EXPECT_THROW(context_inspector.BelongsToSource(geometry_id, id),
                std::logic_error);
   EXPECT_THROW(context_inspector.BelongsToSource(anchored_id, id),
                std::logic_error);
@@ -512,7 +503,8 @@ TEST_F(SceneGraphTest, ModelInspector) {
 // configuration/introspection code. These tests are just smoke tests that the
 // functions work. It relies on GeometryState to properly unit test the
 // full behavior.
-TEST_F(SceneGraphTest, RendererSmokeTest) {
+TEST_F(SceneGraphTest, RendererInSceneGraphSmokeTest) {
+  // Test the renderer added to the SceneGraph.
   const std::string kRendererName = "bob";
 
   EXPECT_EQ(scene_graph_.RendererCount(), 0);
@@ -525,22 +517,73 @@ TEST_F(SceneGraphTest, RendererSmokeTest) {
   EXPECT_EQ(scene_graph_.RendererCount(), 1);
   EXPECT_EQ(scene_graph_.RegisteredRendererNames()[0], kRendererName);
   EXPECT_TRUE(scene_graph_.HasRenderer(kRendererName));
+
+  DRAKE_EXPECT_NO_THROW(scene_graph_.RemoveRenderer(kRendererName));
+  EXPECT_EQ(scene_graph_.RendererCount(), 0);
+  EXPECT_FALSE(scene_graph_.HasRenderer(kRendererName));
+}
+
+TEST_F(SceneGraphTest, RendererInContextSmokeTest) {
+  // Test the renderer added to the context
+  CreateDefaultContext();
+  const std::string kRendererName = "bob";
+
+  EXPECT_EQ(scene_graph_.RendererCount(*context_), 0);
+  EXPECT_EQ(scene_graph_.RegisteredRendererNames(*context_).size(), 0u);
+  EXPECT_FALSE(scene_graph_.HasRenderer(*context_, kRendererName));
+
+  DRAKE_EXPECT_NO_THROW(scene_graph_.AddRenderer(
+      context_.get(), kRendererName, make_unique<DummyRenderEngine>()));
+
+  EXPECT_EQ(scene_graph_.RendererCount(*context_), 1);
+  // No renderer inside SceneGraph since the renderer is added to the context.
+  EXPECT_EQ(scene_graph_.RendererCount(), 0);
+  EXPECT_EQ(scene_graph_.RegisteredRendererNames(*context_)[0], kRendererName);
+  EXPECT_TRUE(scene_graph_.HasRenderer(*context_, kRendererName));
+
+  DRAKE_EXPECT_NO_THROW(
+      scene_graph_.RemoveRenderer(context_.get(), kRendererName));
+  EXPECT_EQ(scene_graph_.RendererCount(*context_), 0);
+  EXPECT_FALSE(scene_graph_.HasRenderer(*context_, kRendererName));
 }
 
 // Query the type name of a render engine. This logic is unique to SceneGraph
 // so we test it here.
 TEST_F(SceneGraphTest, GetRendererTypeName) {
-  const std::string kRendererName = "bob";
+  const std::string kRendererName1 = "bob";
+  const std::string kRendererName2 = "alice";
 
+  CreateDefaultContext();
   DRAKE_EXPECT_NO_THROW(scene_graph_.AddRenderer(
-      kRendererName, make_unique<DummyRenderEngine>()));
+      kRendererName1, make_unique<DummyRenderEngine>()));
+  DRAKE_EXPECT_NO_THROW(scene_graph_.AddRenderer(
+      context_.get(), kRendererName2, make_unique<DummyRenderEngine>()));
 
   // If no renderer has the name, the type doesn't matter.
   EXPECT_EQ(scene_graph_.GetRendererTypeName("non-existent"), "");
+  EXPECT_EQ(scene_graph_.GetRendererTypeName(*context_, "non-existent"), "");
 
   // Get the expected name.
-  EXPECT_EQ(scene_graph_.GetRendererTypeName(kRendererName),
+  EXPECT_EQ(scene_graph_.GetRendererTypeName(kRendererName1),
             NiceTypeName::Get<DummyRenderEngine>());
+  EXPECT_EQ(scene_graph_.GetRendererTypeName(*context_, kRendererName2),
+            NiceTypeName::Get<DummyRenderEngine>());
+}
+
+TEST_F(SceneGraphTest, RemoveRenderer) {
+  const std::string kRendererName = "bob";
+
+  scene_graph_.AddRenderer(kRendererName, make_unique<DummyRenderEngine>());
+
+  EXPECT_TRUE(scene_graph_.HasRenderer(kRendererName));
+
+  scene_graph_.RemoveRenderer(kRendererName);
+
+  EXPECT_FALSE(scene_graph_.HasRenderer(kRendererName));
+
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      scene_graph_.RemoveRenderer("bad_name"),
+      ".* A renderer with the name 'bad_name' does not exist");
 }
 
 // SceneGraph provides a thin wrapper on the GeometryState role manipulation
@@ -555,7 +598,8 @@ TEST_F(SceneGraphTest, RoleManagementSmokeTest) {
   instance->set_proximity_properties(ProximityProperties());
   instance->set_perception_properties(PerceptionProperties());
 
-  GeometryId g_id = scene_graph_.RegisterGeometry(s_id, f_id, move(instance));
+  GeometryId g_id =
+      scene_graph_.RegisterGeometry(s_id, f_id, std::move(instance));
 
   const SceneGraphInspector<double>& inspector = scene_graph_.model_inspector();
   EXPECT_NE(inspector.GetProximityProperties(g_id), nullptr);
@@ -768,6 +812,19 @@ GTEST_TEST(SceneGraphConnectionTest, FullPositionUpdateConnected) {
       SceneGraphTester::FullPoseUpdate(*scene_graph, sg_context));
   DRAKE_EXPECT_NO_THROW(
       SceneGraphTester::FullConfigurationUpdate(*scene_graph, sg_context));
+
+  // Also check that scene graph methods validate contexts.
+  auto& ms_context =
+      diagram->GetMutableSubsystemContext(*mixed_source, diagram_context.get());
+  // Check an ordinary method; glass-box knowledge shows that these all are
+  // implemented on the private mutable_geometry_state() method, which checks
+  // its context.
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      scene_graph->collision_filter_manager(diagram_context.get()),
+      ".*\n.*context-system-mismatch.*");
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      scene_graph->collision_filter_manager(&ms_context),
+      ".*\n.*context-system-mismatch.*");
 }
 
 // Adversarial test case: Missing port connections.
@@ -845,23 +902,12 @@ GTEST_TEST(SceneGraphContextModifier, RegisterGeometry) {
   EXPECT_EQ(1, inspector.NumGeometriesForFrame(frame_id));
   EXPECT_EQ(frame_id, inspector.GetFrameId(sphere_id_1));
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  // 2023-04-01 Deprecation removal.
-  // Test registration of geometry onto _geometry_.
-  GeometryId sphere_id_2 = scene_graph.RegisterGeometry(
-      context.get(), source_id, sphere_id_1, make_sphere_instance());
-  EXPECT_EQ(2, inspector.NumGeometriesForFrame(frame_id));
-  EXPECT_EQ(frame_id, inspector.GetFrameId(sphere_id_2));
-#pragma GCC diagnostic pop
-
-  // 2023-04-01 Change from sphere_id_2 to sphere_id_1.
   // Remove the geometry.
   DRAKE_EXPECT_NO_THROW(
-      scene_graph.RemoveGeometry(context.get(), source_id, sphere_id_2));
-  EXPECT_EQ(1, inspector.NumGeometriesForFrame(frame_id));
+      scene_graph.RemoveGeometry(context.get(), source_id, sphere_id_1));
+  EXPECT_EQ(0, inspector.NumGeometriesForFrame(frame_id));
   DRAKE_EXPECT_THROWS_MESSAGE(
-      inspector.GetFrameId(sphere_id_2),
+      inspector.GetFrameId(sphere_id_1),
       "Referenced geometry \\d+ has not been registered.");
 }
 

@@ -15,13 +15,10 @@ class which is exposed to C++ has been explicitly enumerated in one of the
 source files inside the ``bindings/pydrake`` folder. These bindings are
 installed as a single package called ``pydrake``.
 
-<div class="warning" markdown="1">
-Drake does not support the Python environment supplied by Anaconda. Before
-installing or using Drake, please `conda deactivate` (repeatedly, until even
-the conda base environment has been deactivated) such that none of the paths
-reported `which -a python python3 pip pip3` refer to conda.
-Note that Miniconda seems to work fine; it's only Anaconda that has caused
-problems for some users.
+<div class="note" markdown="1">
+Drake is not tested regularly with Anaconda, so if you are using Anaconda you
+may experience compatibility hiccups; when asking for help, be sure to mention
+that Conda is involved.
 </div>
 
 # Installation
@@ -42,13 +39,13 @@ python3 -c 'import pydrake.all; print(pydrake.__file__)'
 ```
 
 <div class="note" markdown="1">
-If you are using Gurobi, you must either have it installed in the suggested location under `/opt/...` mentioned in Gurobi 9.5, or you must ensure that you define the `${GUROBI_HOME}` environment variable, or specify `${GUROBI_INCLUDE_DIR}` via CMake.
+If you are using Gurobi, you must either have it installed in the suggested location under `/opt/...` mentioned in Gurobi 10.0, or you must ensure that you define the `${GUROBI_HOME}` environment variable, or specify `${GUROBI_INCLUDE_DIR}` via CMake.
 </div>
 
 
 ## What's Available from Python
 
-You should first browse the [Python API](https://drake.mit.edu/pydrake/index.html) to see what
+You should first browse the [Python API](/pydrake/index.html) to see what
 modules are available. The most up-to-date high-level demonstrations of what
 can be done using ``pydrake`` are in Drake's [Tutorials](/index.html#tutorials) and
 the [Underactuated Robotics Textbook](https://underactuated.mit.edu/) and
@@ -124,8 +121,8 @@ simulator = pydrake.systems.analysis.Simulator(diagram)
 
 ## Differences with C++ API
 
-In general, the [Python API](https://drake.mit.edu/pydrake/index.html) should be close to the
-[C++ API](https://drake.mit.edu/doxygen_cxx/index.html). There are some exceptions:
+In general, the [Python API](/pydrake/index.html) should be close to the
+[C++ API](/doxygen_cxx/index.html). There are some exceptions:
 
 ### C++ Class Template Instantiations in Python
 
@@ -383,7 +380,7 @@ If you have SNOPT enabled (either `-DWITH_SNOPT=ON` or `-DWITH_ROBOTLOCOMOTION_S
 ## For Developers
 
 If you are developing Python bindings, please see the Doxygen page
-[Python Bindings](https://drake.mit.edu/doxygen_cxx/group__python__bindings.html) which provides information on programming conventions, documentation, tips
+[Python Bindings](/doxygen_cxx/group__python__bindings.html) which provides information on programming conventions, documentation, tips
 for debugging, and other advice.
 
 </article>

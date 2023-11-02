@@ -34,6 +34,7 @@
 #include "drake/common/drake_assert.h"
 #include "drake/common/drake_copyable.h"
 #include "drake/common/drake_throw.h"
+#include "drake/common/ssize.h"
 #include "drake/multibody/tree/multibody_tree_indexes.h"
 
 namespace drake {
@@ -56,19 +57,24 @@ struct BodyTopology {
   // members of `other`.
   bool operator==(const BodyTopology& other) const {
     if (index != other.index) return false;
-    if (inboard_mobilizer.is_valid() !=
-        other.inboard_mobilizer.is_valid()) return false;
+    if (inboard_mobilizer.is_valid() != other.inboard_mobilizer.is_valid())
+      return false;
     if (inboard_mobilizer.is_valid() &&
-        inboard_mobilizer != other.inboard_mobilizer) return false;
+        inboard_mobilizer != other.inboard_mobilizer)
+      return false;
     if (parent_body.is_valid() != other.parent_body.is_valid()) return false;
-    if (parent_body.is_valid() &&
-        parent_body != other.parent_body) return false;
+    if (parent_body.is_valid() && parent_body != other.parent_body)
+      return false;
     if (child_bodies != other.child_bodies) return false;
     if (body_frame != other.body_frame) return false;
     if (level != other.level) return false;
     if (body_node != other.body_node) return false;
     if (is_floating != other.is_floating) return false;
     if (has_quaternion_dofs != other.has_quaternion_dofs) return false;
+    if (floating_positions_start != other.floating_positions_start)
+      return false;
+    if (floating_velocities_start_in_v != other.floating_velocities_start_in_v)
+      return false;
     return true;
   }
 
@@ -113,7 +119,7 @@ struct BodyTopology {
   bool has_quaternion_dofs{false};
 
   int floating_positions_start{-1};
-  int floating_velocities_start{-1};
+  int floating_velocities_start_in_v{-1};
 };
 
 // Data structure to store the topological information associated with a
@@ -194,7 +200,9 @@ struct MobilizerTopology {
     if (num_positions != other.num_positions) return false;
     if (positions_start != other.positions_start) return false;
     if (num_velocities != other.num_velocities) return false;
-    if (velocities_start != other.velocities_start) return false;
+    if (velocities_start_in_state != other.velocities_start_in_state)
+      return false;
+    if (velocities_start_in_v != other.velocities_start_in_v) return false;
 
     return true;
   }
@@ -244,7 +252,7 @@ struct MobilizerTopology {
   int num_velocities{0};
   // First entry in the global array of states, `x = [q v z]`, for the parent
   // MultibodyTree.
-  int velocities_start{0};
+  int velocities_start_in_state{0};
 
   // Start index in a vector containing only generalized velocities.
   // It is also a valid index into a vector of generalized accelerations (which
@@ -307,7 +315,8 @@ struct JointActuatorTopology {
   JointActuatorIndex index{0};
   // For an actuator in a MultibodyTree model, this index corresponds to the
   // first entry in the global array u containing all actuation values for the
-  // entire model.
+  // entire model. Actuator indexes are assigned in the order actuators are
+  // added to the model, that is, in the order of JointActuatorIndex.
   int actuator_index_start{-1};
   // The number of dofs actuated by this actuator.
   int num_dofs{-1};
@@ -377,16 +386,11 @@ struct BodyNodeTopology {
       return false;
     if (num_mobilizer_velocities != other.num_mobilizer_velocities)
       return false;
-    if (mobilizer_velocities_start != other.mobilizer_velocities_start)
+    if (mobilizer_velocities_start_in_state !=
+        other.mobilizer_velocities_start_in_state)
       return false;
-
-    if (num_flexible_positions != other.num_flexible_positions)
-      return false;
-    if (flexible_positions_start != other.flexible_positions_start)
-      return false;
-    if (num_flexible_velocities != other.num_flexible_velocities)
-      return false;
-    if (flexible_velocities_start != other.flexible_velocities_start)
+    if (mobilizer_velocities_start_in_v !=
+        other.mobilizer_velocities_start_in_v)
       return false;
 
     return true;
@@ -410,25 +414,19 @@ struct BodyNodeTopology {
   std::vector<BodyNodeIndex> child_nodes;
 
   // Returns the number of children to this node.
-  int get_num_children() const { return static_cast<int>(child_nodes.size());}
+  int get_num_children() const { return ssize(child_nodes);}
 
 
   // Start and number of dofs for this node's mobilizer.
   int num_mobilizer_positions{0};
   int mobilizer_positions_start{0};
   int num_mobilizer_velocities{0};
-  int mobilizer_velocities_start{0};
+  int mobilizer_velocities_start_in_state{0};
 
   // Start index in a vector containing only generalized velocities.
   // It is also a valid index into a vector of generalized accelerations (which
   // are the time derivatives of the generalized velocities).
   int mobilizer_velocities_start_in_v{0};
-
-  // Start and number of dofs for this node's body (flexible dofs).
-  int num_flexible_positions{0};
-  int flexible_positions_start{0};
-  int num_flexible_velocities{0};
-  int flexible_velocities_start{0};
 };
 
 // Data structure to store the topological information associated with an
@@ -448,7 +446,7 @@ class MultibodyTreeTopology {
   // members of `other`.
   bool operator==(const MultibodyTreeTopology& other) const {
     if (is_valid_ != other.is_valid_) return false;
-    if (tree_height_ != other.tree_height_) return false;
+    if (forest_height_ != other.forest_height_) return false;
 
     if (num_positions_ != other.num_positions_) return false;
     if (num_velocities_ != other.num_velocities_) return false;
@@ -467,38 +465,38 @@ class MultibodyTreeTopology {
   // Returns the number of bodies in the multibody tree. This includes the
   // "world" body and therefore the minimum number of bodies after
   // MultibodyTree::Finalize() will always be one, not zero.
-  int num_bodies() const { return static_cast<int>(bodies_.size()); }
+  int num_bodies() const { return ssize(bodies_); }
 
   // Returns the number of physical frames in the multibody tree.
   int num_frames() const {
-    return static_cast<int>(frames_.size());
+    return ssize(frames_);
   }
 
   // Returns the number of mobilizers in the multibody tree. Since the "world"
   // body does not have a mobilizer, the number of mobilizers will always equal
   // the number of bodies minus one.
   int num_mobilizers() const {
-    return static_cast<int>(mobilizers_.size());
+    return ssize(mobilizers_);
   }
 
   // Returns the number of tree nodes. This must equal the number of bodies.
   int get_num_body_nodes() const {
-    return static_cast<int>(body_nodes_.size());
+    return ssize(body_nodes_);
   }
 
   // Returns the number of force elements in the topology.
   int num_force_elements() const {
-    return static_cast<int>(force_elements_.size());
+    return ssize(force_elements_);
   }
 
   // Returns the number of joint actuators in the topology.
   int num_joint_actuators() const {
-    return static_cast<int>(joint_actuators_.size());
+    return ssize(joint_actuators_);
   }
 
-  // Returns the number of tree levels in the topology.
-  int tree_height() const {
-    return tree_height_;
+  // Returns the number of levels in the forest topology.
+  int forest_height() const {
+    return forest_height_;
   }
 
   // Returns a constant reference to the corresponding FrameTopology given the
@@ -549,7 +547,7 @@ class MultibodyTreeTopology {
   // tree. In other words, the number of trees in the topology corresponds to
   // the number of children of the world body node (also called "base nodes").
   int num_trees() const {
-    return static_cast<int>(num_tree_velocities_.size());
+    return ssize(num_tree_velocities_);
   }
 
   // Returns the number of generalized velocities for the t-th tree.
@@ -567,9 +565,9 @@ class MultibodyTreeTopology {
   // the vector of generalized velocities for the full model, even if the t-th
   // tree has no generalized velocities. In such case however,
   // num_tree_velocities(t) will be zero.
-  int tree_velocities_start(TreeIndex t) const {
+  int tree_velocities_start_in_v(TreeIndex t) const {
     DRAKE_ASSERT(t < num_trees());
-    return tree_velocities_start_[t];
+    return tree_velocities_start_in_v_[t];
   }
 
   // Returns the tree index for the b-th body. The tree index for the world
@@ -585,6 +583,14 @@ class MultibodyTreeTopology {
   TreeIndex velocity_to_tree_index(int v) const {
     DRAKE_ASSERT(0 <= v && v < num_velocities());
     return velocity_to_tree_index_[v];
+  }
+
+  // Given a tree index, returns `true` if that tree has any degrees of freedom
+  // (ignoring joint locking). An invalid tree index is treated as World's
+  // "tree", which has no dofs.
+  bool tree_has_dofs(TreeIndex tree_index) const {
+    if (!tree_index.is_valid()) return false;  // World doesn't have a Tree.
+    return num_tree_velocities(tree_index) > 0;
   }
 
   // Creates and adds a new BodyTopology to this MultibodyTreeTopology.
@@ -782,14 +788,14 @@ class MultibodyTreeTopology {
     // Re-compilation is not allowed.
     if (is_valid()) {
       throw std::logic_error(
-          "Attempting to call MultibodyTree::Finalize() on an already """
+          "Attempting to call MultibodyTree::Finalize() on an already "
           "finalized MultibodyTree.");
     }
 
     // For each body, assign a body node in a depth first traversal order.
     std::stack<BodyIndex> stack;
     stack.push(BodyIndex(0));  // Starts at the root.
-    tree_height_ = 1;  // At least one level with the world body at the root.
+    forest_height_ = 1;  // At least one level with the world body at the root.
     body_nodes_.reserve(num_bodies());
     while (!stack.empty()) {
       const BodyNodeIndex node(get_num_body_nodes());
@@ -808,7 +814,7 @@ class MultibodyTreeTopology {
       // Updates body levels.
       bodies_[current].level = level;
       // Keep track of the number of levels, the deepest (i.e. max) level.
-      tree_height_ = std::max(tree_height_, level + 1);
+      forest_height_ = std::max(forest_height_, level + 1);
 
       // Since we are doing a DFT, it is valid to ask for the parent node,
       // unless we are at the root.
@@ -861,8 +867,6 @@ class MultibodyTreeTopology {
     // - Number of degrees of freedom (generalized positions and velocities).
     // - Start/end indexes for each node.
     //
-    // TODO(amcastro-tri): count body dofs (i.e. for flexible dofs).
-    //
     // Base-to-Tip loop in DFT order, skipping the world (node = 0).
 
     // Count number of generalized positions and velocities.
@@ -877,50 +881,39 @@ class MultibodyTreeTopology {
     // Place all the generalized positions first followed by the generalized
     // velocities.
     int position_index = 0;
-    int velocity_index = num_positions_;
+    int velocity_index_in_state = num_positions_;
     for (BodyNodeIndex node_index(1);
          node_index < get_num_body_nodes(); ++node_index) {
       BodyNodeTopology& node = body_nodes_[node_index];
       MobilizerTopology& mobilizer = mobilizers_[node.mobilizer];
 
-      if (mobilizer.num_velocities == 0) {  // A weld mobilizer.
-        // For weld mobilizers start indexes are not important since the number
-        // of dofs is zero. However, we do allow accessing Eigen segments with
-        // zero size and for that case Eigen enforces start >= zero.
-        // Therefore, these start indexes are set to zero to allow zero sized
-        // indexes without having to itroduce any special logic for weld
-        // mobilizers.
-        mobilizer.positions_start = 0;
-        mobilizer.velocities_start = 0;
-        mobilizer.velocities_start_in_v = 0;
-      } else {
-        mobilizer.positions_start = position_index;
-        mobilizer.velocities_start = velocity_index;
-        mobilizer.velocities_start_in_v = velocity_index - num_positions_;
-        DRAKE_DEMAND(0 <= mobilizer.velocities_start_in_v);
-      }
+      // Note that a Weld mobilizer claims it starts at the next available
+      // slot but has zero positions and velocities. That means the next
+      // mobilizer will start at the same place.
+      mobilizer.positions_start = position_index;
+      mobilizer.velocities_start_in_state = velocity_index_in_state;
+      mobilizer.velocities_start_in_v =
+          velocity_index_in_state - num_positions_;
+      DRAKE_DEMAND(0 <= mobilizer.velocities_start_in_v);
 
       position_index += mobilizer.num_positions;
-      velocity_index += mobilizer.num_velocities;
+      velocity_index_in_state += mobilizer.num_velocities;
 
       node.mobilizer_positions_start = mobilizer.positions_start;
       node.num_mobilizer_positions = mobilizer.num_positions;
-      node.mobilizer_velocities_start = mobilizer.velocities_start;
+      node.mobilizer_velocities_start_in_state =
+          mobilizer.velocities_start_in_state;
       node.num_mobilizer_velocities = mobilizer.num_velocities;
 
       // Start index in a vector containing only generalized velocities.
       node.mobilizer_velocities_start_in_v = mobilizer.velocities_start_in_v;
-      // Demand indexes to be positive only for mobilizers with a non-zero
-      // number of dofs.
-      DRAKE_DEMAND(0 <= node.mobilizer_velocities_start_in_v ||
-          node.num_mobilizer_velocities == 0);
-      // This test would not pass for a model with all weld joints. Therefore
-      // the check for num_velocities_ == 0.
-      DRAKE_DEMAND(node.mobilizer_velocities_start_in_v < num_velocities_ ||
-          num_velocities_ == 0);
+      DRAKE_DEMAND(0 <= node.mobilizer_velocities_start_in_v);
+      // If the last mobilizer is a Weld, it's "start" location will be
+      // where it _would_ put velocities if it had any.
+      DRAKE_DEMAND(node.mobilizer_velocities_start_in_v <= num_velocities_);
     }
     DRAKE_DEMAND(position_index == num_positions_);
-    DRAKE_DEMAND(velocity_index == num_states_);
+    DRAKE_DEMAND(velocity_index_in_state == num_states_);
 
     // Update position/velocity indexes for free bodies so that they are easily
     // accessible.
@@ -930,7 +923,8 @@ class MultibodyTreeTopology {
         const MobilizerTopology& mobilizer =
             get_mobilizer(body.inboard_mobilizer);
         body.floating_positions_start = mobilizer.positions_start;
-        body.floating_velocities_start = mobilizer.velocities_start;
+        body.floating_velocities_start_in_v =
+            mobilizer.velocities_start_in_v;
       }
     }
 
@@ -1192,26 +1186,24 @@ class MultibodyTreeTopology {
     for (const BodyNodeIndex& root_child_index : root.child_nodes) {
       const BodyNodeTopology& root_child = get_body_node(root_child_index);
       const int nt = CalcNumberOfOutboardVelocities(root_child);
-      if (nt > 0) {
-        const TreeIndex tree_index(num_trees());
-        num_tree_velocities_.push_back(nt);
-        TraverseOutboardNodes(root_child, [&](const BodyNodeTopology& node) {
-          // We recurse all bodies in this tree (with tree_index) to fill in the
-          // maps from body index to tree index and from velocity index to tree
-          // index.
-          body_to_tree_index_[node.body] = tree_index;
-          for (int i = 0; i < node.num_mobilizer_velocities; ++i) {
-            const int v = node.mobilizer_velocities_start_in_v + i;
-            velocity_to_tree_index_[v] = tree_index;
-          }
-        });
-      }
+      const TreeIndex tree_index(num_trees());
+      num_tree_velocities_.push_back(nt);
+      TraverseOutboardNodes(root_child, [&](const BodyNodeTopology& node) {
+        // We recurse all bodies in this tree (with tree_index) to fill in the
+        // maps from body index to tree index and from velocity index to tree
+        // index.
+        body_to_tree_index_[node.body] = tree_index;
+        for (int i = 0; i < node.num_mobilizer_velocities; ++i) {
+          const int v = node.mobilizer_velocities_start_in_v + i;
+          velocity_to_tree_index_[v] = tree_index;
+        }
+      });
     }
 
     // N.B. For trees with no generalized velocities, this code sets
-    // tree_velocities_start_[t] to point to the last dof (plus one) of the last
-    // tree with non-zero velocities. The reason to do so is that we want users
-    // of MultibodyTreeTopology to write code like so:
+    // tree_velocities_start_in_v_[t] to point to the last dof (plus one) of the
+    // last tree with non-zero velocities. The reason to do so is that we want
+    // users of MultibodyTreeTopology to write code like so:
     //
     // const MultibodyTreeTopology& topology = ...
     // for (TreeIndex t(0); t < topology.num_trees(); ++t) {
@@ -1224,18 +1216,18 @@ class MultibodyTreeTopology {
     // In the snippet above index v points to an entry in the vector of
     // generalized velocities for the full model that corresponds to the m-th
     // mobility for the t-th tree.
-    tree_velocities_start_.resize(num_trees(), 0);
+    tree_velocities_start_in_v_.resize(num_trees(), 0);
     for (int t = 1; t < num_trees(); ++t) {
-      tree_velocities_start_[t] =
-          tree_velocities_start_[t - 1] + num_tree_velocities_[t - 1];
+      tree_velocities_start_in_v_[t] =
+          tree_velocities_start_in_v_[t - 1] + num_tree_velocities_[t - 1];
     }
   }
 
   // is_valid is set to `true` after a successful Finalize().
   bool is_valid_{false};
-  // Number of levels (or generations) in the tree topology. After Finalize()
+  // Number of levels (or generations) in the forest topology. After Finalize()
   // there will be at least one level (level = 0) with the world body.
-  int tree_height_{-1};
+  int forest_height_{-1};
 
   // Topological elements:
   std::vector<FrameTopology> frames_;
@@ -1255,12 +1247,12 @@ class MultibodyTreeTopology {
   // Number of generalized velocities for the t-th tree.
   std::vector<int> num_tree_velocities_;
   // Given the generalized velocities vector v for the entire model, the vector
-  // vt = {v(m) s.t. m ∈ [mₛ, mₑ)}, with mₛ = tree_velocities_start_[t] and iₑ =
-  // tree_velocities_start_[t] + num_tree_velocities_[t], are the generalized
-  // velocities for the t-th tree.
-  std::vector<int> tree_velocities_start_;
+  // vt = {v(m) s.t. m ∈ [mₛ, mₑ)}, with mₛ = tree_velocities_start_in_v_[t] and
+  // iₑ = tree_velocities_start_in_v_[t] + num_tree_velocities_[t], are the
+  // generalized velocities for the t-th tree.
+  std::vector<int> tree_velocities_start_in_v_;
   // t = velocity_to_tree_index_[m] is the tree index to which the m-th velocity
-  // belongs.
+  // (within the v vector) belongs.
   std::vector<TreeIndex> velocity_to_tree_index_;
   // t = body_to_tree_index_[b] is the tree index to which the b-th body
   // belongs.

@@ -1,7 +1,4 @@
-load(
-    "@drake//tools/workspace:github.bzl",
-    "github_archive",
-)
+load("//tools/workspace:github.bzl", "github_archive")
 
 def common_robotics_utilities_repository(
         name,
@@ -15,8 +12,11 @@ def common_robotics_utilities_repository(
         updated in ToyotaResearchInstitute/common_robotics_utilities/test/ or
         ToyotaResearchInstitute/common_robotics_utilities/CMakeLists.txt.ros2
         """,
-        commit = "89435ebf4621f4e92d3b4c2a18aec7fa91e0cb75",
-        sha256 = "7577ccf13db9111a90be946996d512d3a9693b356a7e26e4ab9a1ffb90c8ea2b",  # noqa
+        commit = "7c285560cd79261b822299d9e971c28ede82c5de",
+        sha256 = "977c01b89882c82003b53616df6a822170296f47289dee6423abdd58c92a9d9d",  # noqa
         build_file = ":package.BUILD.bazel",
+        patches = [
+            ":patches/vendor.patch",
+        ],
         mirrors = mirrors,
     )

@@ -15,7 +15,6 @@
 
 using std::atomic;
 using std::make_shared;
-using std::move;
 using std::ostream;
 using std::ostringstream;
 using std::string;
@@ -41,12 +40,15 @@ size_t get_next_id(const Variable::Type type) {
 }  // namespace
 
 Variable::Variable(string name, const Type type)
-    : id_{get_next_id(type)}, name_{make_shared<const string>(move(name))} {
+    : id_{get_next_id(type)},
+      name_{make_shared<const string>(std::move(name))} {
   DRAKE_ASSERT(id_ > 0);
 }
+
 string Variable::get_name() const {
-  return *name_;
+  return name_ != nullptr ? *name_ : string{"𝑥"};
 }
+
 string Variable::to_string() const {
   ostringstream oss;
   oss << *this;

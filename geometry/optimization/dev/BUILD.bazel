@@ -1,22 +1,26 @@
 load(
-    "@drake//tools/skylark:drake_cc.bzl",
+    "//tools/skylark:drake_cc.bzl",
     "drake_cc_googletest",
     "drake_cc_library",
     "drake_cc_package_library",
 )
 load("//tools/lint:lint.bzl", "add_lint_tests")
-
-exports_files(["cspace_free_polytope.cc"])
+load(
+    "//tools/skylark:test_tags.bzl",
+    "mosek_test_tags",
+)
 
 drake_cc_library(
     name = "cspace_free_path",
     srcs = ["cspace_free_path.cc"],
     hdrs = ["cspace_free_path.h"],
     deps = [
+        "//common:polynomial",
         "//common/symbolic:monomial_util",
         "//geometry/optimization:c_iris_collision_geometry",
-        "//geometry/optimization:c_iris_separating_plane",
-        "//geometry/optimization:cspace_free_polytope",
+        "//geometry/optimization:cspace_free_internal",
+        "//geometry/optimization:cspace_separating_plane",
+        "//geometry/optimization/dev:polynomial_positive_on_path",
         "//solvers:choose_best_solver",
         "//solvers:mathematical_program",
         "//solvers:mosek_solver",
@@ -46,11 +50,25 @@ drake_cc_library(
 
 drake_cc_googletest(
     name = "cspace_free_path_test",
+    timeout = "long",
     deps = [
         ":c_iris_path_test_utilities",
         "//common/test_utilities:symbolic_test_util",
         "//geometry/optimization:c_iris_test_utilities",
         "//geometry/optimization:cspace_free_polytope",
+    ],
+)
+
+drake_cc_googletest(
+    name = "cspace_free_path_with_mosek_test",
+    timeout = "long",
+    tags = mosek_test_tags(),
+    deps = [
+        ":c_iris_path_test_utilities",
+        "//common/test_utilities:symbolic_test_util",
+        "//common/trajectories:bezier_curve",
+        "//geometry/optimization:c_iris_test_utilities",
+        "//solvers:mosek_solver",
     ],
 )
 
@@ -64,4 +82,4 @@ drake_cc_googletest(
 )
 
 # test
-add_lint_tests()
+add_lint_tests(enable_clang_format_lint = False)

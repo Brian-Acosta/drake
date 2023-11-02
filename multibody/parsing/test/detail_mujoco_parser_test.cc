@@ -6,10 +6,10 @@
 #include <gtest/gtest.h>
 
 #include "drake/common/find_resource.h"
+#include "drake/common/test_utilities/diagnostic_policy_test_base.h"
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
 #include "drake/common/test_utilities/expect_throws_message.h"
 #include "drake/common/text_logging.h"
-#include "drake/multibody/parsing/test/diagnostic_policy_test_base.h"
 #include "drake/multibody/tree/ball_rpy_joint.h"
 #include "drake/multibody/tree/prismatic_joint.h"
 #include "drake/multibody/tree/revolute_joint.h"
@@ -22,6 +22,7 @@ namespace {
 
 using ::testing::MatchesRegex;
 
+using Eigen::Vector2d;
 using Eigen::Vector3d;
 using Eigen::Vector4d;
 using drake::internal::DiagnosticPolicy;
@@ -104,6 +105,8 @@ class MujocoParserTest : public test::DiagnosticPolicyTestBase {
 
   std::string box_obj_{std::filesystem::canonical(FindResourceOrThrow(
       "drake/multibody/parsing/test/box_package/meshes/box.obj"))};
+  std::string non_convex_obj_{std::filesystem::canonical(FindResourceOrThrow(
+      "drake/geometry/test/non_convex_mesh.obj"))};
   std::string box_urdf_{std::filesystem::canonical(FindResourceOrThrow(
       "drake/multibody/parsing/test/box_package/urdfs/box.urdf"))};
 };
@@ -131,6 +134,60 @@ const char* gym_models[] = {
   "point_mass", "reacher", "stacker", "swimmer", "walker"};
 INSTANTIATE_TEST_SUITE_P(GymModels, GymModelTest,
                          testing::ValuesIn(gym_models));
+
+TEST_F(MujocoParserTest, CartPole) {
+  const std::string filename = FindResourceOrThrow(
+      "drake/multibody/parsing/dm_control/suite/cartpole.xml");
+  AddModelFromFile(filename, "cartpole");
+  // For this parse, ignore all warnings.
+  warning_records_.clear();
+
+  plant_.Finalize();
+  // Check the kinematics. Passing this test requires a correct parsing of
+  // joint defaults.
+  auto context = plant_.CreateDefaultContext();
+  const double x = 0.1;
+  const double theta = 0.2;
+  const double l = 1.0;
+  const double z_offset_from_model = 1.0;
+  plant_.SetPositions(context.get(), Vector2d(x, theta));
+  Vector3d p_WP;
+  plant_.CalcPointsPositions(*context, plant_.GetFrameByName("pole_1"),
+                             Vector3d{0, 0, l}, plant_.world_frame(),
+                             &p_WP);
+  EXPECT_TRUE(CompareMatrices(
+      p_WP,
+      Vector3d{x + l * sin(theta), 0, z_offset_from_model + l * cos(theta)},
+      1e-14));
+}
+
+TEST_F(MujocoParserTest, Acrobot) {
+  const std::string filename = FindResourceOrThrow(
+      "drake/multibody/parsing/dm_control/suite/acrobot.xml");
+  AddModelFromFile(filename, "acrobot");
+  // For this parse, ignore all warnings.
+  warning_records_.clear();
+
+  plant_.Finalize();
+  // Check the kinematics. Passing this test requires a correct parsing of the
+  // joint position being defined in the child body frame, not the parent
+  // body frame.
+  auto context = plant_.CreateDefaultContext();
+  const Vector2d q = {0.1, 0.2};
+  const double l1 = 1.0;
+  const double l2 = 0.5;
+  const double z_offset_from_model = 2.0;
+  plant_.SetPositions(context.get(), q);
+  Vector3d p_WP;
+  plant_.CalcPointsPositions(*context, plant_.GetFrameByName("lower_arm"),
+                             Vector3d{0, 0, l2}, plant_.world_frame(),
+                             &p_WP);
+  EXPECT_TRUE(CompareMatrices(
+      p_WP,
+      Vector3d{l1 * sin(q[0]) + l2 * sin(q[0] + q[1]), 0,
+               z_offset_from_model + l1 * cos(q[0]) + l2 * cos(q[0] + q[1])},
+      1e-14));
+}
 
 TEST_F(MujocoParserTest, Option) {
   std::string xml = R"""(
@@ -575,6 +632,7 @@ TEST_F(MujocoParserTest, InertiaFromGeometry) {
   </default>
   <asset>
     <mesh name="box_mesh" file="{}"/>
+    <mesh name="non_convex_mesh" file="{}"/>
   </asset>
   <worldbody>
     <body name="default">
@@ -616,10 +674,13 @@ TEST_F(MujocoParserTest, InertiaFromGeometry) {
     <body name="box_from_mesh">
       <geom name="box_from_mesh" type="mesh" mesh="box_mesh" mass="1.0"/>
     </body>
+    <body name="non_convex_body">
+      <geom name="non_convex" type="mesh" mesh="non_convex_mesh" mass="1.0"/>
+    </body>
   </worldbody>
 </mujoco>
 )""",
-                                box_obj_);
+                                box_obj_, non_convex_obj_);
 
   AddModelFromString(xml, "test");
 
@@ -628,6 +689,7 @@ TEST_F(MujocoParserTest, InertiaFromGeometry) {
   <compiler inertiafromgeom="auto"/>
   <asset>
     <mesh name="box_mesh" file="{}"/>
+    <mesh name="non_convex_mesh" file="{}"/>
   </asset>
   <worldbody>
     <body name="sphere_auto">
@@ -644,10 +706,14 @@ TEST_F(MujocoParserTest, InertiaFromGeometry) {
       <geom name="box_from_mesh_w_density" type="mesh" mesh="box_mesh"
             density="1.0"/>
     </body>
+    <body name="non_convex_body_w_density">
+      <geom name="non_convex_w_density" type="mesh" mesh="non_convex_mesh"
+            density="1.0"/>
+    </body>
   </worldbody>
 </mujoco>
 )""",
-                    box_obj_);
+                    box_obj_, non_convex_obj_);
 
   AddModelFromString(xml, "test_auto");
 
@@ -699,6 +765,7 @@ TEST_F(MujocoParserTest, InertiaFromGeometry) {
   auto check_body = [this, &context](
                         const std::string& body_name,
                         const UnitInertia<double>& unit_M_BBo_B) {
+    SCOPED_TRACE(fmt::format("checking body {}", body_name));
     const Body<double>& body = plant_.GetBodyByName(body_name);
     EXPECT_TRUE(CompareMatrices(
         body.CalcSpatialInertiaInBodyFrame(*context).CopyToFullMatrix6(),
@@ -711,6 +778,7 @@ TEST_F(MujocoParserTest, InertiaFromGeometry) {
                                 const std::string& body_name,
                                 const SpatialInertia<double>& M_BBo_B,
                                 double tol = 1e-14) {
+    SCOPED_TRACE(fmt::format("checking body {} (spatial)", body_name));
     const Body<double>& body = plant_.GetBodyByName(body_name);
     EXPECT_TRUE(CompareMatrices(
         body.CalcSpatialInertiaInBodyFrame(*context).CopyToFullMatrix6(),
@@ -723,18 +791,19 @@ TEST_F(MujocoParserTest, InertiaFromGeometry) {
 
   check_body("default", UnitInertia<double>::SolidSphere(0.1));
   check_body_spatial("sphere", inertia_from_inertial_tag);
-  check_body("capsule", UnitInertia<double>::SolidCapsule(0.1, 4.0));
+  check_body("capsule",
+      UnitInertia<double>::SolidCapsule(0.1, 4.0, Vector3d::UnitZ()));
   check_body("ellipsoid", UnitInertia<double>::SolidEllipsoid(0.1, 0.2, 0.3));
-  check_body("cylinder", UnitInertia<double>::SolidCylinder(0.1, 4.0));
+  check_body("cylinder",
+      UnitInertia<double>::SolidCylinder(0.1, 4.0, Vector3d::UnitZ()));
   check_body("box", UnitInertia<double>::SolidBox(0.2, 4.0, 6.0));
   check_body("box_from_default", UnitInertia<double>::SolidBox(0.2, 0.4, 0.6));
   check_body("ellipsoid_from_default",
              UnitInertia<double>::SolidEllipsoid(0.1, 0.2, 0.3));
   check_body("box_from_sub", UnitInertia<double>::SolidBox(0.8, 1.0, 1.2));
-  SpatialInertia<double> M_BBo_B = SpatialInertia<double>(
-      2.53, Vector3d::Zero(), UnitInertia<double>::SolidSphere(0.1));
-  M_BBo_B += SpatialInertia<double>(2.53, Vector3d::Zero(),
-                                    UnitInertia<double>::SolidSphere(0.2));
+  SpatialInertia<double> M_BBo_B =
+      SpatialInertia<double>::SolidSphereWithMass(2.53, 0.1);
+  M_BBo_B += SpatialInertia<double>::SolidSphereWithMass(2.53, 0.2);
   check_body_spatial("two_spheres", M_BBo_B);
   // Use the equation for the moment of inertia of a cylinder about one end.
   M_BBo_B = SpatialInertia<double>(
@@ -746,8 +815,18 @@ TEST_F(MujocoParserTest, InertiaFromGeometry) {
   check_body_spatial("offset_cylinder", M_BBo_B);
   check_body_spatial(
       "box_from_mesh",
-      SpatialInertia<double>(1.0, Vector3d::Zero(),
-                             UnitInertia<double>::SolidCube(2.0)),
+      SpatialInertia<double>::SolidCubeWithMass(1.0, 2.0),
+      1e-13);
+  // This unit inertia and center of mass were collected empirically from the
+  // results of multibody::CalcSpatialInertia() on the non-convex mesh. The
+  // important fact is that it differs from the result obtained by estimating
+  // inertia on an oriented bounding box.
+  const UnitInertia<double> non_convex_unit_inertia{0.168,  0.168,  0.168,
+                                                    -0.034, -0.034, -0.034};
+  const Vector3d non_convex_com = Vector3d::Constant(0.2166666666666666);
+  check_body_spatial(
+      "non_convex_body",
+      SpatialInertia<double>{1.0, non_convex_com, non_convex_unit_inertia},
       1e-13);
 
   check_body_spatial("sphere_auto", inertia_from_inertial_tag);
@@ -762,9 +841,12 @@ TEST_F(MujocoParserTest, InertiaFromGeometry) {
       SpatialInertia<double>::SolidBoxWithDensity(1000, 0.8, 1.0, 1.2));
   check_body_spatial(
       "box_from_mesh_w_density",
-      SpatialInertia<double>(8.0, Vector3d::Zero(),
-                             UnitInertia<double>::SolidCube(2.0)),
+      SpatialInertia<double>::SolidCubeWithMass(8.0, 2.0),
       1e-12);
+  check_body_spatial(
+      "non_convex_body_w_density",
+      SpatialInertia<double>{0.1, non_convex_com, non_convex_unit_inertia},
+      1e-13);
 
   // A cube rotating about its corner.
   RotationalInertia<double> I_BFo_B(2, 2, 2, -.75, -.75, -.75);
@@ -830,13 +912,17 @@ TEST_F(MujocoParserTest, Joint) {
 <mujoco model="test">
   <default>
     <geom type="sphere" size="1"/>
+    <default class="default_joint">
+      <joint type="hinge" damping="0.24" pos="-.1 -.2 -.3"
+             axis="1 0 0" limited="true" range="-30 60" />
+    </default>
   </default>
   <worldbody>
     <body name="freejoint" pos="1 2 3" euler="30 45 60">
-      <freejoint name="freejoint"/>
+      <freejoint name="xfreejoint"/>  <!-- ignored -->
     </body>
     <body name="free" pos="1 2 3" euler="30 45 60">
-      <joint type="free" name="free"/>
+      <joint type="free" name="xfree"/>  <!-- ignored -->
     </body>
     <body name="ball" pos="1 2 3" euler="30 45 60">
       <joint type="ball" name="ball" damping="0.1" pos=".1 .2 .3"/>
@@ -848,6 +934,9 @@ TEST_F(MujocoParserTest, Joint) {
     <body name="hinge" pos="1 2 3" euler="30 45 60">
       <joint type="hinge" name="hinge" damping="0.3" pos=".1 .2 .3"
              axis="0 1 0" limited="true" range="-30 60"/>
+    </body>
+    <body name="hinge_w_joint_defaults" pos="1 2 3" euler="30 45 60">
+      <joint type="hinge" name="hinge_w_joint_defaults" class="default_joint" />
     </body>
     <body name="default" pos="1 2 3" euler="30 45 60">
       <!-- without the limited=true tag -->
@@ -877,14 +966,18 @@ TEST_F(MujocoParserTest, Joint) {
                        Vector3d{1.0, 2.0, 3.0});
   Vector3d pos{.1, .2, .3};
 
+  // Note: for free bodies Drake ignores the given Mujoco joint name and makes
+  // its own floating joint named like the body.
   const Body<double>& freejoint_body = plant_.GetBodyByName("freejoint");
-  EXPECT_FALSE(plant_.HasJointNamed("freejoint"));
+  EXPECT_FALSE(plant_.HasJointNamed("xfreejoint"));
+  EXPECT_TRUE(plant_.HasJointNamed("freejoint"));
   EXPECT_TRUE(freejoint_body.is_floating());
   EXPECT_TRUE(plant_.GetFreeBodyPose(*context, freejoint_body)
                   .IsNearlyEqualTo(X_WB, 1e-14));
 
   const Body<double>& free_body = plant_.GetBodyByName("free");
-  EXPECT_FALSE(plant_.HasJointNamed("free"));
+  EXPECT_FALSE(plant_.HasJointNamed("xfree"));
+  EXPECT_TRUE(plant_.HasJointNamed("free"));
   EXPECT_TRUE(free_body.is_floating());
   EXPECT_TRUE(
       plant_.GetFreeBodyPose(*context, free_body).IsNearlyEqualTo(X_WB, 1e-14));
@@ -892,7 +985,7 @@ TEST_F(MujocoParserTest, Joint) {
   const BallRpyJoint<double>& ball_joint =
       plant_.GetJointByName<BallRpyJoint>("ball");
   EXPECT_EQ(ball_joint.damping(), 0.1);
-  EXPECT_TRUE(ball_joint.frame_on_parent()
+  EXPECT_TRUE(ball_joint.frame_on_child()
                   .CalcPoseInBodyFrame(*context)
                   .IsNearlyEqualTo(RigidTransformd(pos), 1e-14));
   EXPECT_TRUE(
@@ -902,7 +995,7 @@ TEST_F(MujocoParserTest, Joint) {
   const PrismaticJoint<double>& slide_joint =
       plant_.GetJointByName<PrismaticJoint>("slide");
   EXPECT_EQ(slide_joint.damping(), 0.2);
-  EXPECT_TRUE(slide_joint.frame_on_parent()
+  EXPECT_TRUE(slide_joint.frame_on_child()
                   .CalcPoseInBodyFrame(*context)
                   .IsNearlyEqualTo(RigidTransformd(pos), 1e-14));
   EXPECT_TRUE(
@@ -918,7 +1011,7 @@ TEST_F(MujocoParserTest, Joint) {
   const RevoluteJoint<double>& hinge_joint =
       plant_.GetJointByName<RevoluteJoint>("hinge");
   EXPECT_EQ(hinge_joint.damping(), 0.3);
-  EXPECT_TRUE(hinge_joint.frame_on_parent()
+  EXPECT_TRUE(hinge_joint.frame_on_child()
                   .CalcPoseInBodyFrame(*context)
                   .IsNearlyEqualTo(RigidTransformd(pos), 1e-14));
   EXPECT_TRUE(CompareMatrices(hinge_joint.revolute_axis(), Vector3d{0, 1, 0}));
@@ -932,10 +1025,29 @@ TEST_F(MujocoParserTest, Joint) {
       CompareMatrices(plant_.GetJointByName("hinge").position_upper_limits(),
                       Vector1d{M_PI / 3.0}, 1e-14));
 
+  const RevoluteJoint<double>& hinge_w_joint_defaults_joint =
+      plant_.GetJointByName<RevoluteJoint>("hinge_w_joint_defaults");
+  EXPECT_EQ(hinge_w_joint_defaults_joint.damping(), 0.24);
+  EXPECT_TRUE(
+      hinge_w_joint_defaults_joint.frame_on_child()
+          .CalcPoseInBodyFrame(*context)
+          .IsNearlyEqualTo(RigidTransformd(Vector3d{-0.1, -0.2, -0.3}), 1e-14));
+  EXPECT_TRUE(CompareMatrices(hinge_w_joint_defaults_joint.revolute_axis(),
+                              Vector3d{1, 0, 0}));
+  EXPECT_TRUE(plant_.GetBodyByName("hinge_w_joint_defaults")
+                  .EvalPoseInWorld(*context)
+                  .IsNearlyEqualTo(X_WB, 1e-14));
+  EXPECT_TRUE(CompareMatrices(
+      plant_.GetJointByName("hinge_w_joint_defaults").position_lower_limits(),
+      Vector1d{-M_PI / 6.0}, 1e-14));
+  EXPECT_TRUE(CompareMatrices(
+      plant_.GetJointByName("hinge_w_joint_defaults").position_upper_limits(),
+      Vector1d{M_PI / 3.0}, 1e-14));
+
   const RevoluteJoint<double>& default_joint =
       plant_.GetJointByName<RevoluteJoint>("default");
   EXPECT_EQ(default_joint.damping(), 0.4);
-  EXPECT_TRUE(default_joint.frame_on_parent()
+  EXPECT_TRUE(default_joint.frame_on_child()
                   .CalcPoseInBodyFrame(*context)
                   .IsNearlyIdentity(1e-14));
   EXPECT_TRUE(
@@ -961,7 +1073,7 @@ TEST_F(MujocoParserTest, Joint) {
       plant_.GetJointByName<RevoluteJoint>("hinge2");
   EXPECT_EQ(hinge2_joint.damping(), 0.6);
   EXPECT_TRUE(CompareMatrices(hinge2_joint.revolute_axis(), Vector3d{0, 1, 0}));
-  EXPECT_TRUE(hinge2_joint.frame_on_parent()
+  EXPECT_TRUE(hinge2_joint.frame_on_child()
                   .CalcPoseInBodyFrame(*context)
                   .IsNearlyEqualTo(RigidTransformd(pos), 1e-14));
   EXPECT_TRUE(plant_.GetBodyByName("two_hinges")

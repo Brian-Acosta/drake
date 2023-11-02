@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -47,28 +48,44 @@ class MultibodyPlantDiscreteUpdateManagerAttorney {
     return plant.EvalContactSurfaces(context);
   }
 
-  static void AddInForcesFromInputPorts(const MultibodyPlant<T>& plant,
-                                        const systems::Context<T>& context,
-                                        MultibodyForces<T>* forces) {
-    plant.AddInForcesFromInputPorts(context, forces);
+  static void AddJointLimitsPenaltyForces(const MultibodyPlant<T>& plant,
+                                          const systems::Context<T>& context,
+                                          MultibodyForces<T>* forces) {
+    plant.AddJointLimitsPenaltyForces(context, forces);
   }
 
-  static void CalcNonContactForces(const MultibodyPlant<T>& plant,
-                            const drake::systems::Context<T>& context,
-                            MultibodyForces<T>* forces) {
-    return plant.CalcNonContactForces(context, true /* is discrete */, forces);
+  static void AddAppliedExternalGeneralizedForces(
+      const MultibodyPlant<T>& plant, const drake::systems::Context<T>& context,
+      MultibodyForces<T>* forces) {
+    plant.AddAppliedExternalGeneralizedForces(context, forces);
   }
 
-  [[nodiscard]] static ScopeExit ThrowIfNonContactForceInProgress(
-      const MultibodyPlant<T>& plant,
-      const drake::systems::Context<T>& context) {
-    return plant.ThrowIfNonContactForceInProgress(context);
+  static void AddAppliedExternalSpatialForces(
+      const MultibodyPlant<T>& plant, const drake::systems::Context<T>& context,
+      MultibodyForces<T>* forces) {
+    plant.AddAppliedExternalSpatialForces(context, forces);
+  }
+
+  static void AddJointActuationForces(const MultibodyPlant<T>& plant,
+                                      const drake::systems::Context<T>& context,
+                                      VectorX<T>* forces) {
+    plant.AddJointActuationForces(context, forces);
   }
 
   static void CalcForceElementsContribution(
       const MultibodyPlant<T>& plant, const drake::systems::Context<T>& context,
       MultibodyForces<T>* forces) {
     return plant.CalcForceElementsContribution(context, forces);
+  }
+
+  static VectorX<T> AssembleActuationInput(const MultibodyPlant<T>& plant,
+                                           const systems::Context<T>& context) {
+    return plant.AssembleActuationInput(context);
+  }
+
+  static VectorX<T> AssembleDesiredStateInput(
+      const MultibodyPlant<T>& plant, const systems::Context<T>& context) {
+    return plant.AssembleDesiredStateInput(context);
   }
 
   // TODO(xuchenhan-tri): Remove this when SceneGraph takes control of all
@@ -93,24 +110,35 @@ class MultibodyPlantDiscreteUpdateManagerAttorney {
     return plant.geometry_id_to_body_index_;
   }
 
-  static const std::vector<internal::CouplerConstraintSpecs>&
+  static const internal::JointLockingCacheData<T>& EvalJointLockingCache(
+      const MultibodyPlant<T>& plant, const systems::Context<T>& context) {
+    return plant.EvalJointLockingCache(context);
+  }
+
+  static const std::map<MultibodyConstraintId, internal::CouplerConstraintSpec>&
   coupler_constraints_specs(const MultibodyPlant<T>& plant) {
     return plant.coupler_constraints_specs_;
   }
 
-  static const std::vector<int>& EvalJointLockingIndices(
-      const MultibodyPlant<T>& plant, const systems::Context<T>& context) {
-    return plant.EvalJointLockingIndices(context);
-  }
-
-  static const std::vector<internal::DistanceConstraintSpecs>&
+  static const std::map<MultibodyConstraintId,
+                        internal::DistanceConstraintSpec>&
   distance_constraints_specs(const MultibodyPlant<T>& plant) {
     return plant.distance_constraints_specs_;
   }
 
-  static const std::vector<internal::BallConstraintSpecs>&
+  static const std::map<MultibodyConstraintId, internal::BallConstraintSpec>&
   ball_constraints_specs(const MultibodyPlant<T>& plant) {
     return plant.ball_constraints_specs_;
+  }
+
+  static const std::map<MultibodyConstraintId, internal::WeldConstraintSpec>&
+  weld_constraints_specs(const MultibodyPlant<T>& plant) {
+    return plant.weld_constraints_specs_;
+  }
+
+  static const std::map<MultibodyConstraintId, bool>& GetConstraintActiveStatus(
+      const systems::Context<T>& context, const MultibodyPlant<T>& plant) {
+    return plant.GetConstraintActiveStatus(context);
   }
 
   static BodyIndex FindBodyByGeometryId(const MultibodyPlant<T>& plant,

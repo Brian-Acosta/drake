@@ -36,6 +36,7 @@ namespace {
 // `plant_` contains the default model from parsing. The model contained in
 // `plant_ri_` contains the identical model, but with reflected inertia values
 // added to each joint actuator.
+// These tests expect nominal model to have no reflected rotor inertia.
 class MultibodyPlantReflectedInertiaTests : public ::testing::Test {
  public:
   // @param[in] rotor_inertias Individual rotor inertia values for each joint
@@ -53,6 +54,7 @@ class MultibodyPlantReflectedInertiaTests : public ::testing::Test {
                                          const VectorX<double>& gear_ratios) {
     LoadIiwaWithGripper(&plant_);
     LoadIiwaWithGripper(&plant_ri_);
+    SetReflectedInertiaToZero(&plant_);
     AddInReflectedInertia(&plant_ri_, rotor_inertias, gear_ratios);
 
     plant_.Finalize();
@@ -140,6 +142,16 @@ class MultibodyPlantReflectedInertiaTests : public ::testing::Test {
           plant->get_mutable_joint_actuator(index);
       joint_actuator.set_default_rotor_inertia(rotor_inertias(int{index}));
       joint_actuator.set_default_gear_ratio(gear_ratios(int{index}));
+    }
+  }
+
+  void SetReflectedInertiaToZero(MultibodyPlant<double>* plant) {
+    DRAKE_DEMAND(plant != nullptr);
+    for (JointActuatorIndex index(0); index < plant->num_actuators(); ++index) {
+      JointActuator<double>& joint_actuator =
+          plant->get_mutable_joint_actuator(index);
+      joint_actuator.set_default_rotor_inertia(0.0);
+      joint_actuator.set_default_gear_ratio(1.0);
     }
   }
 
@@ -583,6 +595,57 @@ TEST_F(MultibodyPlantReflectedInertiaTests, ScalarConversion) {
   const double kTolerance = 16.0 * std::numeric_limits<double>::epsilon();
   EXPECT_TRUE(CompareMatrices(mass_matrix_ri, M_autodiff, kTolerance,
                               MatrixCompareType::relative));
+}
+
+// Test that default parameters can be changed after finalize and end up in new
+// default contexts.
+TEST_F(MultibodyPlantReflectedInertiaTests, DefaultParameters) {
+  // Arbitrary reflected inertia values.
+  VectorX<double> rotor_inertias(kNumJoints);
+  VectorX<double> gear_ratios(kNumJoints);
+  rotor_inertias << 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9;
+  gear_ratios << 1, 2, 4, 8, 16, 32, 64, 128, 256;
+
+  // Load the models.
+  LoadBothModelsSetStateAndFinalize(rotor_inertias, gear_ratios);
+
+  for (JointActuatorIndex index(0); index < plant_ri_.num_actuators();
+       ++index) {
+    JointActuator<double>& joint_actuator =
+        dynamic_cast<JointActuator<double>&>(
+            plant_ri_.get_mutable_joint_actuator(JointActuatorIndex(index)));
+
+    // Default gear ratio and rotor inertia end up in the context.
+    EXPECT_EQ(joint_actuator.default_gear_ratio(),
+              joint_actuator.gear_ratio(*context_ri_));
+    EXPECT_EQ(joint_actuator.default_rotor_inertia(),
+              joint_actuator.rotor_inertia(*context_ri_));
+  }
+
+  for (JointActuatorIndex index(0); index < plant_ri_.num_actuators();
+       ++index) {
+    JointActuator<double>& joint_actuator =
+        dynamic_cast<JointActuator<double>&>(
+            plant_ri_.get_mutable_joint_actuator(JointActuatorIndex(index)));
+    // Set the model parameters to something different.
+    joint_actuator.set_default_gear_ratio(99);
+    joint_actuator.set_default_rotor_inertia(100);
+  }
+
+  // Create a new default context.
+  auto context = plant_ri_.CreateDefaultContext();
+
+  for (JointActuatorIndex index(0); index < plant_ri_.num_actuators();
+       ++index) {
+    JointActuator<double>& joint_actuator =
+        dynamic_cast<JointActuator<double>&>(
+            plant_ri_.get_mutable_joint_actuator(JointActuatorIndex(index)));
+    // New default values should propagate to a new default context.
+    EXPECT_EQ(joint_actuator.default_gear_ratio(),
+              joint_actuator.gear_ratio(*context));
+    EXPECT_EQ(joint_actuator.default_rotor_inertia(),
+              joint_actuator.rotor_inertia(*context));
+  }
 }
 
 }  // namespace

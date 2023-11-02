@@ -27,7 +27,7 @@ Argument:
 """
 
 load("@bazel_tools//tools/build_defs/repo:utils.bzl", "patch")
-load("@drake//tools/workspace:os.bzl", "determine_os")
+load("//tools/workspace:os.bzl", "determine_os")
 
 def _impl(repository_ctx):
     os_result = determine_os(repository_ctx)
@@ -63,8 +63,9 @@ def _impl(repository_ctx):
     patch(
         repository_ctx,
         patches = [
-            Label("@drake//tools/workspace/drake_visualizer:use_drake_lcmtypes.patch"),  # noqa
-            Label("@drake//tools/workspace/drake_visualizer:draw_lcm_mesh.patch"),  # noqa
+            Label("@drake//tools/workspace/drake_visualizer:patches/use_drake_lcmtypes.patch"),  # noqa
+            Label("@drake//tools/workspace/drake_visualizer:patches/draw_lcm_mesh.patch"),  # noqa
+            Label("@drake//tools/workspace/drake_visualizer:patches/warn_gltf.patch"),  # noqa
         ],
         patch_args = [
             "--directory=lib/python{}/site-packages/director".format(

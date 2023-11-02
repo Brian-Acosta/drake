@@ -1,5 +1,5 @@
 load(
-    "@drake//tools/performance:defs.bzl",
+    "//tools/performance:defs.bzl",
     "drake_cc_googlebench_binary",
     "drake_py_experiment_binary",
 )
@@ -13,7 +13,7 @@ drake_cc_googlebench_binary(
     add_test_rule = True,
     test_args = [
         # When testing, skip over Args() that are >= 100.
-        "--benchmark_filter=-/.00+/.$$",
+        "--benchmark_filter=-/.00",
     ],
     test_timeout = "moderate",
     deps = [

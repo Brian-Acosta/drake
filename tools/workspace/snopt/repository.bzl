@@ -32,14 +32,8 @@ load(
     "@bazel_tools//tools/build_defs/repo:git_worker.bzl",
     "git_repo",
 )
-load(
-    "@drake//tools/workspace:os.bzl",
-    "determine_os",
-)
-load(
-    "@drake//tools/workspace:execute.bzl",
-    "execute_and_return",
-)
+load("//tools/workspace:os.bzl", "determine_os")
+load("//tools/workspace:execute.bzl", "execute_and_return")
 
 def snopt_repository(
         name,
@@ -215,7 +209,7 @@ _attrs = {
     "init_submodules": attr.bool(),
     "verbose": attr.bool(),
     "patches": attr.label_list(
-        default = ["@drake//tools/workspace/snopt:snopt-openmp.patch"],
+        default = ["@drake//tools/workspace/snopt:patches/snopt-openmp.patch"],
     ),
     "patch_cmds": attr.string_list(),
     "patch_tool": attr.string(default = "patch"),

@@ -1,5 +1,5 @@
 load(
-    "@drake//tools/skylark:drake_cc.bzl",
+    "//tools/skylark:drake_cc.bzl",
     "drake_cc_googletest",
     "drake_cc_library",
     "drake_cc_package_library",
@@ -153,6 +153,8 @@ drake_cc_library(
     ],
     deps = [
         ":trajectory",
+        "//common:drake_bool",
+        "//common/symbolic:polynomial",
         "//math:binomial_coefficient",
     ],
 )
@@ -293,7 +295,10 @@ drake_cc_googletest(
     name = "bezier_curve_test",
     deps = [
         ":bezier_curve",
+        "//common/symbolic:polynomial",
         "//common/test_utilities",
+        "//geometry/optimization:convex_set",
+        "//solvers:mathematical_program",
     ],
 )
 
@@ -306,4 +311,4 @@ drake_cc_googletest(
     ],
 )
 
-add_lint_tests(enable_clang_format_lint = True)
+add_lint_tests()

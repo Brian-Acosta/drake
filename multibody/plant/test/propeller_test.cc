@@ -17,8 +17,8 @@ namespace {
 GTEST_TEST(PropellerTest, SinglePropTest) {
   systems::DiagramBuilder<double> builder;
 
-  const double timestep = 0.0;
-  auto plant = builder.AddSystem<MultibodyPlant<double>>(timestep);
+  const double time_step = 0.0;
+  auto plant = builder.AddSystem<MultibodyPlant<double>>(time_step);
 
   const double mass = 1.0;
   const auto M_B =
@@ -96,8 +96,8 @@ GTEST_TEST(PropellerTest, SinglePropTest) {
 GTEST_TEST(PropellerTest, BiRotorTest) {
   systems::DiagramBuilder<double> builder;
 
-  const double timestep = 0.0;
-  auto plant = builder.AddSystem<MultibodyPlant<double>>(timestep);
+  const double time_step = 0.0;
+  auto plant = builder.AddSystem<MultibodyPlant<double>>(time_step);
 
   const double mass = 1.0;
   const auto M_B =
@@ -133,8 +133,8 @@ GTEST_TEST(PropellerTest, BiRotorTest) {
   const Eigen::Vector2d command(.3, .4);
   diagram->get_input_port(0).FixValue(context.get(), command);
   const Eigen::VectorXd acceleration = diagram->EvalTimeDerivatives(*context)
-                                            .get_generalized_velocity()
-                                            .CopyToVector();
+                                           .get_generalized_velocity()
+                                           .CopyToVector();
   EXPECT_TRUE(CompareMatrices(
       acceleration.head<3>(),
       Eigen::Vector3d(0, (command[1] - command[0]) * arm_length * thrust_ratio,

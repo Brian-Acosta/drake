@@ -1,7 +1,10 @@
 #include "drake/geometry/meshcat_visualizer.h"
 
-#include <drake_vendor/msgpack.hpp>
+#include <thread>
+
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <msgpack.hpp>
 
 #include "drake/common/find_resource.h"
 #include "drake/common/test_utilities/expect_throws_message.h"
@@ -15,6 +18,8 @@
 namespace drake {
 namespace geometry {
 namespace {
+
+using multibody::AddMultibodyPlantSceneGraph;
 
 // The tests in this file require a dependency on MultibodyPlant.  One could
 // implement the tests without that dependency, but not without duplicating (or
@@ -37,8 +42,7 @@ class MeshcatVisualizerWithIiwaTest : public ::testing::Test {
 
   void SetUpDiagram(MeshcatVisualizerParams params = {}) {
     systems::DiagramBuilder<double> builder;
-    auto [plant, scene_graph] =
-        multibody::AddMultibodyPlantSceneGraph(&builder, 0.001);
+    auto [plant, scene_graph] = AddMultibodyPlantSceneGraph(&builder, 0.001);
     plant_ = &plant;
     scene_graph_ = &scene_graph;
     multibody::Parser(plant_).AddModels(
@@ -61,6 +65,18 @@ class MeshcatVisualizerWithIiwaTest : public ::testing::Test {
     context_ = diagram_->CreateDefaultContext();
   }
 
+  void CheckVisible(const std::string& path, bool visibility) {
+    ASSERT_TRUE(meshcat_->HasPath(path));
+    const std::string property =
+        meshcat_->GetPackedProperty(path, "visible");
+    ASSERT_GT(property.size(), 0);
+    msgpack::object_handle oh =
+        msgpack::unpack(property.data(), property.size());
+    auto data = oh.get().as<internal::SetPropertyData<bool>>();
+    EXPECT_EQ(data.property, "visible");
+    EXPECT_EQ(data.value, visibility);
+  }
+
   std::shared_ptr<Meshcat> meshcat_;
   multibody::MultibodyPlant<double>* plant_{};
   SceneGraph<double>* scene_graph_{};
@@ -72,6 +88,10 @@ class MeshcatVisualizerWithIiwaTest : public ::testing::Test {
 TEST_F(MeshcatVisualizerWithIiwaTest, BasicTest) {
   SetUpDiagram();
 
+  // Visibility remains unset until geometry gets added.
+  EXPECT_EQ(meshcat_->GetPackedProperty("/drake/visualizer", "visible").size(),
+            0);
+
   EXPECT_FALSE(meshcat_->HasPath("/drake/visualizer/iiwa14"));
   diagram_->ForcedPublish(*context_);
   EXPECT_TRUE(meshcat_->HasPath("/drake/visualizer/iiwa14"));
@@ -80,6 +100,7 @@ TEST_F(MeshcatVisualizerWithIiwaTest, BasicTest) {
                   fmt::format("/drake/visualizer/iiwa14/iiwa_link_{}", link)),
               "");
   }
+  CheckVisible("/drake/visualizer", true);
 
   // Confirm that the transforms change after running a simulation.
   const std::string packed_X_W7 =
@@ -165,23 +186,13 @@ TEST_F(MeshcatVisualizerWithIiwaTest, NotVisibleByDefault) {
   MeshcatVisualizerParams params;
   params.visible_by_default = false;
 
-  // Create the diagram and publish both the initialization and periodic event.
+  // Create and run the diagram.
   SetUpDiagram(params);
-  {
-    auto events = diagram_->AllocateCompositeEventCollection();
-    diagram_->GetInitializationEvents(*context_, events.get());
-    diagram_->Publish(*context_, events->get_publish_events());
-    diagram_->ForcedPublish(*context_);
-  }
+  systems::Simulator<double> simulator(*diagram_);
+  simulator.AdvanceTo(0.1);
 
   // Confirm that the path was added but was set to be invisible.
-  ASSERT_TRUE(meshcat_->HasPath("/drake/visualizer"));
-  const std::string property =
-      meshcat_->GetPackedProperty("/drake/visualizer", "visible");
-  msgpack::object_handle oh = msgpack::unpack(property.data(), property.size());
-  auto data = oh.get().as<internal::SetPropertyData<bool>>();
-  EXPECT_EQ(data.property, "visible");
-  EXPECT_EQ(data.value, false);
+  CheckVisible("/drake/visualizer", false);
 }
 
 TEST_F(MeshcatVisualizerWithIiwaTest, DeletePrefixOnInitialization) {
@@ -196,7 +207,9 @@ TEST_F(MeshcatVisualizerWithIiwaTest, DeletePrefixOnInitialization) {
   {  // Send an initialization event.
     auto events = diagram_->AllocateCompositeEventCollection();
     diagram_->GetInitializationEvents(*context_, events.get());
-    diagram_->Publish(*context_, events->get_publish_events());
+    const systems::EventStatus status =
+        diagram_->Publish(*context_, events->get_publish_events());
+    EXPECT_TRUE(status.succeeded());
   }
   // Confirm that my scribble was deleted.
   EXPECT_FALSE(meshcat_->HasPath("/drake/visualizer/my_random_path"));
@@ -209,7 +222,9 @@ TEST_F(MeshcatVisualizerWithIiwaTest, DeletePrefixOnInitialization) {
   {  // Send an initialization event.
     auto events = diagram_->AllocateCompositeEventCollection();
     diagram_->GetInitializationEvents(*context_, events.get());
-    diagram_->Publish(*context_, events->get_publish_events());
+    const systems::EventStatus status =
+        diagram_->Publish(*context_, events->get_publish_events());
+    EXPECT_TRUE(status.did_nothing());
   }
   // Confirm that my scribble remains.
   EXPECT_TRUE(meshcat_->HasPath("/drake/visualizer/my_random_path"));
@@ -320,23 +335,6 @@ TEST_F(MeshcatVisualizerWithIiwaTest, ScalarConversion) {
   ad_diagram->ForcedPublish(*ad_context);
 }
 
-TEST_F(MeshcatVisualizerWithIiwaTest, UpdateAlphaSliders) {
-  MeshcatVisualizerParams params;
-  params.enable_alpha_slider = true;
-  SetUpDiagram(params);
-  systems::Simulator<double> simulator(*diagram_);
-
-  // Simulate for a moment and publish to populate the visualizer.
-  simulator.AdvanceTo(0.1);
-  diagram_->ForcedPublish(*context_);
-
-  meshcat_->SetSliderValue("visualizer α", 0.5);
-
-  // Simulate and publish again to cause an update.
-  simulator.AdvanceTo(0.1);
-  diagram_->ForcedPublish(*context_);
-}
-
 // When opted-in by the user, we should display the hydroelastic tessellation
 // instead of the primitive shape.
 GTEST_TEST(MeshcatVisualizerTest, HydroGeometry) {
@@ -344,8 +342,7 @@ GTEST_TEST(MeshcatVisualizerTest, HydroGeometry) {
   for (bool show_hydroelastic : {false, true}) {
     // Load a scene with hydroelastic geometry.
     systems::DiagramBuilder<double> builder;
-    auto [plant, scene_graph] =
-        multibody::AddMultibodyPlantSceneGraph(&builder, 0.001);
+    auto [plant, scene_graph] = AddMultibodyPlantSceneGraph(&builder, 0.001);
     multibody::Parser(&plant).AddModelsFromUrl(
         "package://drake/multibody/meshcat/test/hydroelastic.sdf");
     plant.Finalize();
@@ -389,8 +386,7 @@ GTEST_TEST(MeshcatVisualizerTest, MultipleModels) {
   auto meshcat = std::make_shared<Meshcat>();
 
   systems::DiagramBuilder<double> builder;
-  auto [plant, scene_graph] =
-      multibody::AddMultibodyPlantSceneGraph(&builder, 0.001);
+  auto [plant, scene_graph] = AddMultibodyPlantSceneGraph(&builder, 0.001);
   std::string urdf = FindResourceOrThrow(
       "drake/manipulation/models/iiwa_description/urdf/"
       "iiwa14_no_collision.urdf");
@@ -431,6 +427,210 @@ GTEST_TEST(MeshcatVisualizerTest, MultipleModels) {
                   "/drake/visualizer/second/iiwa14/iiwa_link_{}", link)),
               "");
   }
+}
+
+// Use geometry properties to control which geometry is shown.
+GTEST_TEST(MeshcatVisualizerTest, AcceptingProperty) {
+  for (bool include_unspecified_accepting : {true, false}) {
+    for (const std::string accepting : {"", "prefix", "no_match"}) {
+      SCOPED_TRACE(fmt::format("include_unspecified = {}, accepting_str = {}",
+                               include_unspecified_accepting,
+                               accepting.empty() ? "null" : accepting.c_str()));
+
+      // Load a simple model with one geometry.
+      auto meshcat = std::make_shared<Meshcat>();
+      systems::DiagramBuilder<double> builder;
+      auto [plant, scene_graph] = AddMultibodyPlantSceneGraph(&builder, 0.001);
+      multibody::Parser(&plant).AddModelsFromUrl(
+          "package://drake/geometry/render/test/box.sdf");
+      plant.Finalize();
+
+      // Add the accepting tag (if given) to the geometry.
+      auto& inspector = scene_graph.model_inspector();
+      const FrameId body_frame =
+          plant.GetBodyFrameIdOrThrow(plant.GetBodyByName("box").index());
+      const auto geom_ids =
+          inspector.GetGeometries(body_frame, Role::kIllustration);
+      DRAKE_DEMAND(geom_ids.size() == 1);
+      const GeometryId geom_id = *geom_ids.begin();
+      const IllustrationProperties* old_props =
+          scene_graph.model_inspector().GetIllustrationProperties(geom_id);
+      DRAKE_DEMAND(old_props != nullptr);
+      if (!accepting.empty()) {
+        IllustrationProperties new_props(*old_props);
+        new_props.AddProperty("meshcat", "accepting", accepting);
+        scene_graph.AssignRole(*plant.get_source_id(), geom_id, new_props,
+                               RoleAssign::kReplace);
+      }
+
+      // Create the visualizer.
+      MeshcatVisualizerParams params;
+      params.include_unspecified_accepting = include_unspecified_accepting;
+      params.prefix = "prefix";
+      MeshcatVisualizer<double>::AddToBuilder(&builder, scene_graph, meshcat,
+                                              params);
+      auto diagram = builder.Build();
+      auto context = diagram->CreateDefaultContext();
+
+      // Publish geometry. Check whether the shape was published.
+      const std::string geom_path =
+          fmt::format("prefix/box/box/{}", geom_id.get_value());
+      const bool should_show =
+          (accepting == "prefix") ||
+          (include_unspecified_accepting && accepting.empty());
+      diagram->ForcedPublish(*context);
+      EXPECT_EQ(meshcat->HasPath(geom_path), should_show);
+    }
+  }
+}
+
+// Full system acceptance test of setting alpha slider values.
+TEST_F(MeshcatVisualizerWithIiwaTest, AlphaSlidersSystemCheck) {
+  MeshcatVisualizerParams params;
+  params.enable_alpha_slider = true;
+  SetUpDiagram(params);
+  systems::Simulator<double> simulator(*diagram_);
+
+  // Simulate for a moment and publish to populate the visualizer.
+  simulator.AdvanceTo(0.1);
+  diagram_->ForcedPublish(*context_);
+
+  meshcat_->SetSliderValue("visualizer α", 0.5);
+
+  // Simulate and publish again to cause an update.
+  simulator.AdvanceTo(0.1);
+  diagram_->ForcedPublish(*context_);
+}
+
+// Tests to see if the given meshcat instance has had the "modulated_opacity"
+// set for the given path. Returns the value if so, nullopt otherwise.
+std::optional<double> GetOpacityProperty(const Meshcat& meshcat,
+                                         const std::string& path) {
+  const std::string bytes =
+      meshcat.GetPackedProperty(path, "modulated_opacity");
+  if (bytes.empty()) {
+    return {};
+  }
+  msgpack::object_handle oh = msgpack::unpack(bytes.data(), bytes.size());
+  auto decoded = oh.get().as<internal::SetPropertyData<double>>();
+  return decoded.value;
+}
+
+// Check the effect that changing alpha sliders has on geometry opacity.
+// MeshcatVisualizer now has limited logic for controlling alpha based on slider
+// value -- the majority of the heavy lifting is done by meshcat.js.
+// MeshcatVisualizer is responsible for initializing all of the initial alphas
+// and efficiently updating after the fact. We'll be checking that the expected
+// messages have been sent.
+GTEST_TEST(MeshcatVisualizerTest, AlphaSliderCheckResults) {
+  // Load a simple model with one geometry.
+  auto meshcat = std::make_shared<Meshcat>();
+  systems::DiagramBuilder<double> builder;
+  auto [plant, scene_graph] = AddMultibodyPlantSceneGraph(&builder, 0.001);
+  multibody::Parser(&plant).AddModelsFromUrl(
+      "package://drake/geometry/render/test/box.sdf");
+  plant.Finalize();
+
+  // Get the geometry id so we can create the path for the geometry.
+  auto& inspector = scene_graph.model_inspector();
+  const FrameId body_frame =
+      plant.GetBodyFrameIdOrThrow(plant.GetBodyByName("box").index());
+  const auto geom_ids =
+      inspector.GetGeometries(body_frame, Role::kIllustration);
+  DRAKE_DEMAND(geom_ids.size() == 1);
+  const GeometryId geom_id = *geom_ids.begin();
+  const std::string geom_path =
+      fmt::format("visualizer/box/box/{}", geom_id.get_value());
+
+  // Create the visualizer.
+  MeshcatVisualizerParams params;
+  params.prefix = "visualizer";
+  params.enable_alpha_slider = true;
+  MeshcatVisualizer<double>::AddToBuilder(&builder, scene_graph, meshcat,
+                                          params);
+  auto diagram = builder.Build();
+  auto context = diagram->CreateDefaultContext();
+
+  // After instantiation, the first publish should initialize the modulated
+  // opacity for each geometry individually with the initial value of 1.
+  diagram->ForcedPublish(*context);
+  const std::optional<double> init_alpha =
+      GetOpacityProperty(*meshcat, geom_path);
+  ASSERT_TRUE(init_alpha.has_value());
+  EXPECT_EQ(*init_alpha, 1.0);
+
+  // The opacity value started as one, attempting to redundantly "change" it to
+  // the same value will do nothing.
+  meshcat->SetSliderValue("visualizer α", 1.0);
+  diagram->ForcedPublish(*context);
+  ASSERT_FALSE(GetOpacityProperty(*meshcat, params.prefix).has_value());
+
+  // For a somewhat arbitrary sequence of opacity values, we're confirming that
+  // the slider value is always set to the "modulating_opacity" property.
+  // These values must be integer multiples of 0.02 between 0.02 and 1 -- this
+  // is how the slider is configured -- and 1 must not come first -- because
+  // the slider value started as one, and setting it redundantly is ignored.
+  for (const double slider_value : {0.2, 0.76, 1.0, 0.02}) {
+    meshcat->SetSliderValue("visualizer α", slider_value);
+    diagram->ForcedPublish(*context);
+
+    // We should have dispatched a set property on the *visualizer root* with
+    // the given slider value.
+    const std::optional<double> mod_opacity_value =
+        GetOpacityProperty(*meshcat, params.prefix);
+    ASSERT_TRUE(mod_opacity_value.has_value());
+    EXPECT_EQ(*mod_opacity_value, slider_value);
+  }
+}
+
+void Sleep(double seconds) {
+  auto millis = static_cast<int64_t>(seconds * 1000);
+  std::this_thread::sleep_for(std::chrono::milliseconds(millis));
+}
+
+GTEST_TEST(MeshcatVisualizerTest, RealtimeRate) {
+  // Set up a simulation with a visualizer. To avoid any potential ambiguity
+  // around publish event timing, we'll configure the visualizer to publish at
+  // 1024 Hz but we'll manually step time at 1000 Hz. This guarantees that
+  // exactly one publish event has been triggered after each one of our steps
+  // (as long as we don't advance past 42 ms).
+  systems::DiagramBuilder<double> builder;
+  auto [plant, scene_graph] = AddMultibodyPlantSceneGraph(&builder, 0.0);
+  plant.Finalize();
+  auto meshcat = std::make_shared<Meshcat>();
+  MeshcatVisualizerParams params;
+  params.publish_period = 1.0 / 1024;
+  auto* meshcat_visualizer = &MeshcatVisualizer<double>::AddToBuilder(
+      &builder, scene_graph, meshcat, params);
+  systems::Simulator<double> simulator(builder.Build());
+
+  // Bootstrap the realtime rate calculator.
+  simulator.AdvanceTo(0.002);
+  EXPECT_GT(meshcat->GetRealtimeRate(), 0.0);
+
+  // After sleeping for much more wall time (>= 0.500) than sim time (0.001) and
+  // then taking exactly one more step, the rate should be quite slow (< 1/500).
+  Sleep(0.5);
+  simulator.AdvanceTo(0.003);
+  const double slow_rate = meshcat->GetRealtimeRate();
+  EXPECT_LE(slow_rate, 0.002);
+
+  // When we reset the calculator before stepping, the rate does not update.
+  meshcat_visualizer->ResetRealtimeRateCalculator();
+  simulator.AdvanceTo(0.004);
+  EXPECT_EQ(meshcat->GetRealtimeRate(), slow_rate);
+
+  // One more step causes an update. (The new reported rate will almost
+  // certainly be faster than slow_rate, but we don't want to rely on the
+  // kernel's details of process scheduling, or else we could be flaky.)
+  simulator.AdvanceTo(0.005);
+  EXPECT_NE(meshcat->GetRealtimeRate(), slow_rate);
+}
+
+TEST_F(MeshcatVisualizerWithIiwaTest, Graphviz) {
+  SetUpDiagram();
+  EXPECT_THAT(visualizer_->GetGraphvizString(),
+              testing::HasSubstr("-> meshcat_in"));
 }
 
 }  // namespace

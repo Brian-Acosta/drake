@@ -1,5 +1,5 @@
 load(
-    "@drake//tools/skylark:drake_cc.bzl",
+    "//tools/skylark:drake_cc.bzl",
     "drake_cc_binary",
     "drake_cc_googletest",
     "drake_cc_library",
@@ -7,11 +7,11 @@ load(
     "drake_cc_test",
 )
 load(
-    "@drake//tools/skylark:drake_py.bzl",
+    "//tools/skylark:drake_py.bzl",
     "drake_py_binary",
     "drake_py_unittest",
 )
-load("@drake//tools/install:install.bzl", "install")
+load("//tools/install:install.bzl", "install")
 load("//tools/lint:lint.bzl", "add_lint_tests")
 
 package(default_visibility = ["//visibility:public"])
@@ -44,6 +44,7 @@ drake_cc_package_library(
         ":name_value",
         ":network_policy",
         ":nice_type_name",
+        ":parallelism",
         ":pointer_cast",
         ":polynomial",
         ":random",
@@ -83,6 +84,7 @@ drake_cc_library(
     name = "essential",
     srcs = [
         "drake_assert_and_throw.cc",
+        "drake_deprecated.cc",
         "text_logging.cc",
     ],
     hdrs = [
@@ -94,6 +96,7 @@ drake_cc_library(
         "drake_throw.h",
         "eigen_types.h",
         "never_destroyed.h",
+        "ssize.h",
         "text_logging.h",
     ],
     deps = [
@@ -394,6 +397,15 @@ drake_cc_library(
 )
 
 drake_cc_library(
+    name = "parallelism",
+    srcs = ["parallelism.cc"],
+    hdrs = ["parallelism.h"],
+    deps = [
+        ":essential",
+    ],
+)
+
+drake_cc_library(
     name = "is_cloneable",
     hdrs = ["is_cloneable.h"],
 )
@@ -625,6 +637,13 @@ drake_cc_googletest(
 )
 
 drake_cc_googletest(
+    name = "ssize_test",
+    deps = [
+        ":essential",
+    ],
+)
+
+drake_cc_googletest(
     name = "drake_bool_test",
     deps = [
         ":drake_bool",
@@ -787,6 +806,7 @@ drake_cc_googletest(
     copts = ["-Wno-deprecated-declarations"],
     deps = [
         ":essential",
+        "//common/test_utilities:expect_throws_message",
     ],
 )
 
@@ -1002,6 +1022,14 @@ drake_cc_googletest(
 )
 
 drake_cc_googletest(
+    name = "parallelism_test",
+    num_threads = 2,
+    deps = [
+        ":parallelism",
+    ],
+)
+
+drake_cc_googletest(
     name = "polynomial_test",
     deps = [
         ":essential",
@@ -1170,6 +1198,7 @@ drake_cc_googletest(
 )
 
 add_lint_tests(
+    enable_clang_format_lint = False,
     python_lint_extra_srcs = [
         ":test/resource_tool_installed_test.py",
     ],

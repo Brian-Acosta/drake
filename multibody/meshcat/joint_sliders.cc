@@ -11,6 +11,7 @@
 #include "drake/common/autodiff_overloads.h"
 #include "drake/common/scope_exit.h"
 #include "drake/common/unused.h"
+#include "drake/geometry/meshcat_graphviz.h"
 
 namespace {
 // Boilerplate for std::visit.
@@ -249,6 +250,19 @@ void JointSliders<T>::CalcOutput(
 }
 
 template <typename T>
+typename systems::LeafSystem<T>::GraphvizFragment
+JointSliders<T>::DoGetGraphvizFragment(
+    const typename systems::LeafSystem<T>::GraphvizFragmentParams& params)
+    const {
+  geometry::internal::MeshcatGraphviz meshcat_graphviz(
+      /* path = */ std::nullopt,
+      /* subscribe = */ true);
+  return meshcat_graphviz.DecorateResult(
+      systems::LeafSystem<T>::DoGetGraphvizFragment(
+          meshcat_graphviz.DecorateParams(params)));
+}
+
+template <typename T>
 Eigen::VectorXd JointSliders<T>::Run(const Diagram<T>& diagram,
                                 std::optional<double> timeout,
                                 std::string stop_button_keycode) const {
@@ -278,6 +292,8 @@ Eigen::VectorXd JointSliders<T>::Run(const Diagram<T>& diagram,
   using Clock = std::chrono::steady_clock;
   using Duration = std::chrono::duration<double>;
   const auto start_time = Clock::now();
+
+  diagram.ExecuteInitializationEvents(root_context.get());
 
   // Set the context to the initial slider values.
   plant_->SetPositions(&plant_context,

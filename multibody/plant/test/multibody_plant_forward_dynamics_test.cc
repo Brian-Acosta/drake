@@ -162,8 +162,11 @@ TEST_F(KukaIiwaModelForwardDynamicsTests, ForwardDynamicsTest) {
 // This test verifies this does not trigger a spurious exception.
 GTEST_TEST(MultibodyPlantForwardDynamics, AtlasRobot) {
   MultibodyPlant<double> plant(0.0);
-  auto atlas_instance = Parser(&plant).AddModelsFromUrl(
-      "package://drake_models/atlas/atlas_convex_hull.urdf").at(0);
+  auto atlas_instance =
+      Parser(&plant)
+          .AddModelsFromUrl(
+              "package://drake_models/atlas/atlas_convex_hull.urdf")
+          .at(0);
   plant.Finalize();
 
   // Create a context and store an arbitrary configuration.
@@ -190,17 +193,16 @@ GTEST_TEST(MultibodyPlantForwardDynamics, AtlasRobot) {
     //  2 temps in MbTS::CalcArticulatedBodyForceCache (F_B_W_, tau_).
     //  1 temp  in MbP::AssembleActuationInput (actuation_input).
     //  2 temps in MbTS::DoCalcTimeDerivatives (xdot, qdot).
-    LimitMalloc guard({ .max_num_allocations = 5 });
+    LimitMalloc guard({.max_num_allocations = 5});
     EXPECT_NO_THROW(plant.CalcTimeDerivatives(*context, derivatives.get()));
   }
 
   // Verify that the implicit dynamics match the continuous ones.
   Eigen::VectorXd residual = plant.AllocateImplicitTimeDerivativesResidual();
   plant.CalcImplicitTimeDerivativesResidual(*context, *derivatives, &residual);
-  // Note the slightly looser tolerance of 4e-13 which was required for this
-  // test.
+  // A looser tolerance of 6e-13 was required for this to pass on the Macintosh.
   EXPECT_TRUE(CompareMatrices(
-      residual, Eigen::VectorXd::Zero(plant.num_multibody_states()), 4e-13));
+      residual, Eigen::VectorXd::Zero(plant.num_multibody_states()), 6e-13));
 }
 
 // Verifies we can do forward dynamics on a model with a zero-sized state.
@@ -214,11 +216,8 @@ GTEST_TEST(WeldedBoxesTest, ForwardDynamicsViaArticulatedBodyAlgorithm) {
   MultibodyPlant<double> plant(discrete_update_period);
 
   // Set a model with two boxes anchored to the world via weld joints.
-  const Vector3d p_BoBcm_B = Vector3d::Zero();
-  const UnitInertia<double> G_BBcm = UnitInertia<double>::SolidCube(kCubeSize);
   const SpatialInertia<double> M_BBo_B =
-      SpatialInertia<double>::MakeFromCentralInertia(kBoxMass, p_BoBcm_B,
-                                                     G_BBcm);
+      SpatialInertia<double>::SolidCubeWithMass(kBoxMass, kCubeSize);
   // Create two rigid bodies.
   const auto& boxA = plant.AddRigidBody("boxA", M_BBo_B);
   const auto& boxB = plant.AddRigidBody("boxB", M_BBo_B);
@@ -243,8 +242,8 @@ GTEST_TEST(WeldedBoxesTest, ForwardDynamicsViaArticulatedBodyAlgorithm) {
 
 std::unique_ptr<systems::LinearSystem<double>> MakeLinearizedCartPole(
     double time_step) {
-  const std::string sdf_file = FindResourceOrThrow(
-      "drake/examples/multibody/cart_pole/cart_pole.sdf");
+  const std::string sdf_file =
+      FindResourceOrThrow("drake/examples/multibody/cart_pole/cart_pole.sdf");
 
   MultibodyPlant<double> plant(time_step);
   Parser(&plant).AddModels(sdf_file);
@@ -282,23 +281,39 @@ GTEST_TEST(MultibodyPlantTest, CartPoleLinearization) {
 }
 // TODO(amcastro-tri): Include test with non-zero actuation and external forces.
 
-// Helper function to create a uniform-density cube B and add it to a plant.
+// Helper function to create a uniform-density box B and add it to a plant.
 // @param[in] plant MultibodyPlant to which body B is added.
 // @param[in] body_name name of the body that is being added to the plant.
 // @param[in] mass mass of the body that is being added to the plant.
-// @param[in] length length, width, and depth of the cube-shaped body.
+// @param[in] Lx length along the X axis of B.
+// @param[in] Ly length along the Y axis of B.
+// @param[in] Lz length along the Z axis of B.
 // @param[in] skip_validity_check setting which is `true` to skip the validity
 //  check on the new body B's spatial inertia, which ensures an exception is not
 //  thrown when setting body B's spatial inertia (which would otherwise occur if
 //  mass or link_length is NaN). Avoiding this early exception allows for a
 //  later exception to be thrown in a subsequent function and tested below.
 // @note The position vector from Bcm (B's center of mass which is at the cube's
-// geometric center) to Bo (B's origin) is p_BcmBo = (-length/2, 0, 0).
+// geometric center) to Bo (B's origin) is p_BcmBo = (-Lx/2, 0, 0).
+const RigidBody<double>& AddBoxLink(MultibodyPlant<double>* plant,
+                                    const std::string& body_name,
+                                    const double mass, const double Lx,
+                                    const double Ly, const double Lz,
+                                    const bool skip_validity_check = false) {
+  DRAKE_DEMAND(plant != nullptr);
+  const Vector3<double> p_BoBcm_B(Lx / 2, 0, 0);
+  const UnitInertia<double> G_BBcm_B =
+      UnitInertia<double>::SolidBox(Lx, Ly, Lz);
+  const UnitInertia<double> G_BBo_B =
+      G_BBcm_B.ShiftFromCenterOfMass(-p_BoBcm_B);
+  const SpatialInertia<double> M_BBo_B(mass, p_BoBcm_B, G_BBo_B,
+                                       skip_validity_check);
+  return plant->AddRigidBody(body_name, M_BBo_B);
+}
+
 const RigidBody<double>& AddCubicalLink(
-    MultibodyPlant<double>* plant,
-    const std::string& body_name,
-    const double mass,
-    const double length,
+    MultibodyPlant<double>* plant, const std::string& body_name,
+    const double mass, const double length,
     const bool skip_validity_check = false) {
   DRAKE_DEMAND(plant != nullptr);
   const Vector3<double> p_BoBcm_B(length / 2, 0, 0);
@@ -326,9 +341,8 @@ class ConnectedRigidBodiesTest : public ::testing::Test {
   //   the lengths of uniform-density links B and C, respectively.
   // @throws std::exception if a joint_type_name is not "revolute", "prismatic",
   //   or "FreeJoint".
-  void MakePlant(const std::string& jointA_type_name,
-                 const double mA, const double lA,
-                 const std::string* jointB_type_name = nullptr,
+  void MakePlant(const std::string& jointA_type_name, const double mA,
+                 const double lA, const std::string* jointB_type_name = nullptr,
                  const double mB = 0, const double lB = 0,
                  const std::string* jointC_type_name = nullptr,
                  const double mC = 0, const double lC = 0) {
@@ -387,22 +401,23 @@ class ConnectedRigidBodiesTest : public ::testing::Test {
   //   or "FreeJoint".
   // @returns pointer to a revolute joint (if one is created), otherwise null.
   const RevoluteJoint<double>* AddJointToTestPlant(
-      const std::string& joint_type_name,
-      const RigidBody<double>& bodyA, const RigidTransform<double>& X_AF,
-      const RigidBody<double>& bodyB) {
+      const std::string& joint_type_name, const RigidBody<double>& bodyA,
+      const RigidTransform<double>& X_AF, const RigidBody<double>& bodyB) {
     const RevoluteJoint<double>* joint{nullptr};
     const std::string joint_name =
         bodyA.name() + "_" + bodyB.name() + "_" + joint_type_name;
     const RigidTransform<double> X_BM;  // Identity rigid transform.
     if (joint_type_name == PrismaticJoint<double>::kTypeName) {
-      plant_.AddJoint<PrismaticJoint>(joint_name,
-          bodyA, X_AF, bodyB, X_BM, Vector3<double>::UnitX());
+      plant_.AddJoint<PrismaticJoint>(joint_name, bodyA, X_AF, bodyB, X_BM,
+                                      Vector3<double>::UnitX());
     } else if (joint_type_name == RevoluteJoint<double>::kTypeName) {
-      joint = &plant_.AddJoint<RevoluteJoint>(joint_name,
-          bodyA, X_AF, bodyB, X_BM, Vector3<double>::UnitZ());
+      joint = &plant_.AddJoint<RevoluteJoint>(joint_name, bodyA, X_AF, bodyB,
+                                              X_BM, Vector3<double>::UnitZ());
     } else if (joint_type_name != "FreeJoint") {  // Do nothing for free joint!
-      const std::string message = "The test fixture ConnectedRigidBodiesTest "
-        "does not support a joint of type " + joint_type_name + ".\n";
+      const std::string message =
+          "The test fixture ConnectedRigidBodiesTest "
+          "does not support a joint of type " +
+          joint_type_name + ".\n";
       throw std::runtime_error(message);
     }
     return joint;  // Reminder: FreeJoint does not actually create a joint.
@@ -422,9 +437,10 @@ TEST_F(ConnectedRigidBodiesTest, ThrowErrorForZeroMassTranslatingBody) {
 
   // Verify assertion is thrown if mA = 0 since articulated body hinge
   // inertia matrix = [0] which is not positive definite.
-  DRAKE_EXPECT_THROWS_MESSAGE(plant_.EvalForwardDynamics(*context_),
-    "An internal mass matrix .+ body world to body bodyA "
-    "is not positive-definite. .+ allows translation,[^]*");
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      plant_.EvalForwardDynamics(*context_),
+      "An internal mass matrix .+ body world to body bodyA "
+      "is not positive-definite. .+ allows translation,[^]*");
 
   // Verify no assertion is thrown if mA = 1E-4 since articulated body hinge
   // inertia matrix = [1E-4] which is positive definite (and far from singular).
@@ -441,9 +457,10 @@ TEST_F(ConnectedRigidBodiesTest, ThrowErrorForZeroInertiaRotatingBody) {
 
   // Verify assertion is thrown if mA = 0 since articulated body hinge
   // inertia matrix = [0] which is not positive definite.
-  DRAKE_EXPECT_THROWS_MESSAGE(plant_.EvalForwardDynamics(*context_),
-    "An internal mass matrix .+ body world to body bodyA "
-    "is not positive-definite. .+ allows rotation,[^]*");
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      plant_.EvalForwardDynamics(*context_),
+      "An internal mass matrix .+ body world to body bodyA "
+      "is not positive-definite. .+ allows rotation,[^]*");
 
   // Verify no assertion is thrown if mA = 1E-4 since articulated body hinge
   // inertia matrix is positive definite (and far from singular).
@@ -462,17 +479,19 @@ TEST_F(ConnectedRigidBodiesTest, ThrowErrorForZeroMassTranslating2Bodies) {
 
   // Verify assertion is thrown if mA = 1, mB = 0 (zero-mass distal body) since
   // articulated body hinge inertia matrix = [0] which is not positive definite.
-  DRAKE_EXPECT_THROWS_MESSAGE(plant_.EvalForwardDynamics(*context_),
-    "An internal mass matrix .+ body bodyA to body bodyB "
-    "is not positive-definite. .+ allows translation,[^]*");
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      plant_.EvalForwardDynamics(*context_),
+      "An internal mass matrix .+ body bodyA to body bodyB "
+      "is not positive-definite. .+ allows translation,[^]*");
 
   // Verify assertion is thrown if mA = 0, mB = 1 (zero-mass inboard body) since
   // articulated body hinge inertia matrix = [0] which is not positive definite.
   bodyA_->SetMass(context_.get(), 0);
   bodyB_->SetMass(context_.get(), 1);
-  DRAKE_EXPECT_THROWS_MESSAGE(plant_.EvalForwardDynamics(*context_),
-    "An internal mass matrix .+ body world to body bodyA "
-    "is not positive-definite. .+ allows translation,[^]*");
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      plant_.EvalForwardDynamics(*context_),
+      "An internal mass matrix .+ body world to body bodyA "
+      "is not positive-definite. .+ allows translation,[^]*");
 
   // Verify assertion is thrown if mA = 0, mB = 1E9 (zero-mass inboard body)
   // since articulated body hinge inertia matrix ≈ [-2.38419e-07] which is not
@@ -480,9 +499,10 @@ TEST_F(ConnectedRigidBodiesTest, ThrowErrorForZeroMassTranslating2Bodies) {
   // TODO(Mitiguy) It seems surprising that the matrix ≠ [0] since mA = 0.
   //  Explain why matrix is ≈ 10⁸ * machine epsilon distant from [0].
   bodyB_->SetMass(context_.get(), 1E9);
-  DRAKE_EXPECT_THROWS_MESSAGE(plant_.EvalForwardDynamics(*context_),
-    "An internal mass matrix .+ body world to body bodyA "
-    "is not positive-definite. .+ allows translation,[^]*");
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      plant_.EvalForwardDynamics(*context_),
+      "An internal mass matrix .+ body world to body bodyA "
+      "is not positive-definite. .+ allows translation,[^]*");
 
   // Verify no assertion is thrown if mA = 1E-3, mB = 1E9 since articulated body
   // hinge inertia matrix is positive definite (and far enough from singular).
@@ -512,9 +532,10 @@ TEST_F(ConnectedRigidBodiesTest, ThrowErrorForZeroInertiaRotating3Bodies) {
   // Verify assertion is thrown if mA = mB = 1, mC = 0 (zero-inertia outboard
   // body) since articulated body hinge inertia matrix = [0] which is not
   // positive definite.
-  DRAKE_EXPECT_THROWS_MESSAGE(plant_.EvalForwardDynamics(*context_),
-    "An internal mass matrix .+ body bodyB to body bodyC "
-    "is not positive-definite. .+ allows rotation,[^]*");
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      plant_.EvalForwardDynamics(*context_),
+      "An internal mass matrix .+ body bodyB to body bodyC "
+      "is not positive-definite. .+ allows rotation,[^]*");
 
   // Verify 𝐧𝐨 assertion is thrown if mA = 1, mB = 0, mC = 1 (zero-inertia
   // middle link) or mA = 0, mB = 1, mC = 1 (zero-inertia inboard link).
@@ -535,13 +556,14 @@ TEST_F(ConnectedRigidBodiesTest, ThrowErrorForZeroInertiaRotating3Bodies) {
   //  The tests herein were chosen because they worked -- based on computation
   //  in computer hardware available from CI (Continuous Integration) testing.
   bodyB_->SetMass(context_ptr, 0);
-  DRAKE_EXPECT_THROWS_MESSAGE(plant_.EvalForwardDynamics(*context_),
-    "An internal mass matrix .+ body world to body bodyA "
-    "is not positive-definite. .+ allows rotation,[^]*");
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      plant_.EvalForwardDynamics(*context_),
+      "An internal mass matrix .+ body world to body bodyA "
+      "is not positive-definite. .+ allows rotation,[^]*");
 
   // Verify no assertion is thrown if the initial revolute angles for WA and BC
   // are each 0 degrees and AB's initial revolute angle is far-enough from zero.
-  jointAB_->set_angle(context_ptr,  0.1 * M_PI/180);
+  jointAB_->set_angle(context_ptr, 0.1 * M_PI / 180);
   DRAKE_EXPECT_NO_THROW(plant_.EvalForwardDynamics(*context_))
 }
 
@@ -555,14 +577,155 @@ TEST_F(ConnectedRigidBodiesTest, ThrowErrorForZeroMassInertiaFreeBody) {
 
   // Verify assertion is thrown if mA = 0 since articulated body hinge inertia
   // matrix is a 𝟔 x 𝟔 zero matrix (albeit with NaN in upper-triangular part).
-  DRAKE_EXPECT_THROWS_MESSAGE(plant_.EvalForwardDynamics(*context_),
-    "An internal mass matrix .+ body world to body bodyA "
-    "is not positive-definite. .+ allows rotation.+ translation[^]*");
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      plant_.EvalForwardDynamics(*context_),
+      "An internal mass matrix .+ body world to body bodyA "
+      "is not positive-definite. .+ allows rotation.+ translation[^]*");
 
   // Verify no assertion is thrown if mA = 1E-4 since articulated body hinge
   // inertia matrix is positive definite (and far from singular).
   bodyA_->SetMass(context_.get(), 1E-4);
   DRAKE_EXPECT_NO_THROW(plant_.EvalForwardDynamics(*context_))
+}
+
+// The purpose of this test is to verify that the status of locked joints
+// propagates through all forward dynamics ABA computations. It is expected that
+// locked joints behave as welded at the configuration given in the context with
+// zero velocity. We create a double pendulum with bodies A and B attached to
+// the world at the "shoulder" joint and locked at the zero configuration at the
+// elbow joint. We also create a single pendulum with body C that is identical
+// kinematically and inertially to the composite body given by "welding" bodies
+// A and B at the elbow joint. We verify that the acceleration of the shoulder
+// joints match given an arbitrary state.
+GTEST_TEST(JointLocking, PendulumAccelerationTest) {
+  // Continuous mode plant.
+  MultibodyPlant<double> plant{0.0};
+
+  const double mA = 1.0, mB = 2.0, mC = 3.0;  // Mass of links A, B, C.
+  const double lAx = 1.0, lBx = 2.0,
+               lCx = 3.0;  // Length along x of links A, B, C.
+  const double lAy = 1.0, lBy = 1.0,
+               lCy = 1.0;  // Length along y of links A, B, C.
+  const double lAz = 1.0, lBz = 1.0,
+               lCz = 1.0;  // Length along z of links A, B, C.
+
+  // Arbitrary state.
+  const double qShoulder = M_PI_4;  // [rad]
+  const double qdotShoulder = 0.1;  // [rad/s]
+
+  const RigidBody<double>& bodyA =
+      AddBoxLink(&plant, "bodyA", mA, lAx, lAy, lAz);
+  const RigidBody<double>& bodyB =
+      AddBoxLink(&plant, "bodyB", mB, lBx, lBy, lBz);
+  const RigidBody<double>& bodyC =
+      AddBoxLink(&plant, "bodyC", mC, lCx, lCy, lCz);
+
+  // Joints for the locked double pendulum.
+  const RigidTransform<double> X_WF;
+  const RigidTransform<double> X_AM;
+  const RevoluteJoint<double>& shoulder_AB =
+      plant.AddJoint<RevoluteJoint>("shoulder_AB", plant.world_body(), X_WF,
+                                    bodyA, X_AM, Vector3<double>::UnitY());
+  const RigidTransform<double> X_AF(Vector3<double>(lAx, 0.0, 0.0));
+  const RigidTransform<double> X_BM;
+  const RevoluteJoint<double>& elbow_AB = plant.AddJoint<RevoluteJoint>(
+      "elbow_AB", bodyA, X_AF, bodyB, X_BM, Vector3<double>::UnitY());
+
+  // Joint for the single pendulum.
+  const RigidTransform<double> X_CM;
+  const RevoluteJoint<double>& shoulder_C =
+      plant.AddJoint<RevoluteJoint>("shoulder_C", plant.world_body(), X_WF,
+                                    bodyC, X_CM, Vector3<double>::UnitY());
+
+  plant.Finalize();
+
+  std::unique_ptr<systems::Context<double>> context =
+      plant.CreateDefaultContext();
+
+  // Lock the elbow at the 0 state. `Joint::Lock()` will set the velocity to 0.
+  elbow_AB.set_angle(context.get(), 0.0);
+  elbow_AB.Lock(context.get());
+
+  // Set the shoulders to the same angle and angular rate.
+  shoulder_AB.set_angle(context.get(), qShoulder);
+  shoulder_C.set_angle(context.get(), qShoulder);
+  shoulder_AB.set_angular_rate(context.get(), qdotShoulder);
+  shoulder_C.set_angular_rate(context.get(), qdotShoulder);
+
+  {
+    const VectorX<double> v_dot =
+        MultibodyPlantTester::CalcGeneralizedAccelerations(plant, *context);
+
+    // Verify the locked dof has zero acceleration.
+    EXPECT_EQ(v_dot[elbow_AB.velocity_start()], 0.0);
+    // Verify the v_dot for both shoulder joints within rounding error of each
+    // other.
+    EXPECT_NEAR(v_dot[shoulder_AB.velocity_start()],
+                v_dot[shoulder_C.velocity_start()], kEpsilon);
+  }
+
+  // Unlock the elbow joint.
+  elbow_AB.Unlock(context.get());
+  {
+    const VectorX<double> v_dot =
+        MultibodyPlantTester::CalcGeneralizedAccelerations(plant, *context);
+
+    // Verify non-zero acceleration when unlocked.
+    EXPECT_NE(v_dot[elbow_AB.velocity_start()], 0.0);
+  }
+}
+
+// The purpose of this test is to verify that the status of locked free bodies
+// propagates through all forward dynamics ABA computations, and that cached
+// quantities have the correct dependencies. It is expected that locked free
+// bodies behave as welded at the configuration given in the context with zero
+// velocity. We create a single rigid body and verify that when unlocked, the
+// free body's acceleration matches the gravity vector of the plant and when
+// locked, the free body's acceleration is 0.
+GTEST_TEST(JointLocking, FreebodyAccelerationTest) {
+  // Continuous mode plant.
+  MultibodyPlant<double> plant{0.0};
+
+  const double mB = 1.0;  // Mass of body B.   [kg]
+  const double rB = 0.5;  // Radius of body B. [m]
+  const SpatialInertia<double> M_BBo_B =
+      SpatialInertia<double>::SolidSphereWithMass(mB, rB);
+  const RigidBody<double>& bodyB = plant.AddRigidBody("B", M_BBo_B);
+
+  // Set the gravity vector to something non-zero.
+  const Vector3<double> g(1.0, 2.0, 3.0);
+  plant.mutable_gravity_field().set_gravity_vector(g);
+
+  plant.Finalize();
+
+  // Calculate unlocked then locked, same context.
+  {
+    std::unique_ptr<systems::Context<double>> context =
+        plant.CreateDefaultContext();
+
+    {
+      const VectorX<double> v_dot =
+          MultibodyPlantTester::CalcGeneralizedAccelerations(plant, *context);
+      VectorX<double> v_dot_expected(6);
+      v_dot_expected << 0.0, 0.0, 0.0, g[0], g[1], g[2];
+      EXPECT_TRUE(CompareMatrices(v_dot, v_dot_expected));
+    }
+
+    bodyB.Lock(context.get());
+
+    {
+      const VectorX<double> v_dot =
+          MultibodyPlantTester::CalcGeneralizedAccelerations(plant, *context);
+      VectorX<double> v_dot_expected(6);
+      v_dot_expected << 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+      EXPECT_TRUE(CompareMatrices(v_dot, v_dot_expected));
+    }
+
+    const SpatialAcceleration<double> A_WB =
+        plant.EvalBodySpatialAccelerationInWorld(*context, bodyB);
+    EXPECT_TRUE(CompareMatrices(A_WB.rotational(), Vector3<double>::Zero()));
+    EXPECT_TRUE(CompareMatrices(A_WB.translational(), Vector3<double>::Zero()));
+  }
 }
 
 }  // namespace

@@ -10,12 +10,9 @@
 #include <utility>
 #include <vector>
 
-#include <drake_vendor/tinyxml2.h>
 #include <fmt/format.h>
+#include <tinyxml2.h>
 
-#include "drake/geometry/proximity/meshing_utilities.h"
-#include "drake/geometry/proximity/obb.h"
-#include "drake/geometry/proximity/obj_to_surface_mesh.h"
 #include "drake/geometry/shape_specification.h"
 #include "drake/math/rigid_transform.h"
 #include "drake/math/rotation_matrix.h"
@@ -23,6 +20,7 @@
 #include "drake/multibody/parsing/detail_tinyxml.h"
 #include "drake/multibody/parsing/detail_tinyxml2_diagnostic.h"
 #include "drake/multibody/tree/ball_rpy_joint.h"
+#include "drake/multibody/tree/geometry_spatial_inertia.h"
 #include "drake/multibody/tree/prismatic_joint.h"
 #include "drake/multibody/tree/revolute_joint.h"
 #include "drake/multibody/tree/scoped_name.h"
@@ -253,20 +251,36 @@ class MujocoParser {
 
   void ParseJoint(XMLElement* node, const RigidBody<double>& parent,
                   const RigidBody<double>& child, const RigidTransformd& X_WC,
-                  const RigidTransformd& X_PC) {
+                  const RigidTransformd& X_PC,
+                  const std::string& child_class = "") {
     std::string name;
     if (!ParseStringAttribute(node, "name", &name)) {
       // Use "parent-body" as the default joint name.
       name = fmt::format("{}-{}", parent.name(), child.name());
     }
 
+    std::string class_name;
+    if (!ParseStringAttribute(node, "class", &class_name)) {
+      class_name = child_class.empty() ? "main" : child_class;
+    }
+    if (default_joint_.count(class_name) > 0) {
+      ApplyDefaultAttributes(*default_joint_.at(class_name), node);
+    }
+
     Vector3d pos = Vector3d::Zero();
     ParseVectorAttribute(node, "pos", &pos);
-    const RigidTransformd X_PJ(pos);
-    const RigidTransformd X_CJ = X_PC.InvertAndCompose(X_PJ);
+    // Drake wants the joint position in the parent frame, but MuJoCo specifies
+    // it in the child body frame.
+    const RigidTransformd X_CJ(pos);
+    const RigidTransformd X_PJ = X_PC * X_CJ;
 
     Vector3d axis = Vector3d::UnitZ();
     ParseVectorAttribute(node, "axis", &axis);
+    // Drake wants the axis in the parent frame, but MuJoCo specifies it in the
+    // child body frame. But, by definition, these are always the same for
+    // revolute(hinge) joint and prismatic(slide) joint because the axis is the
+    // constraint that defines the joint.  For ball joint and free joint, the
+    // axis attribute is ignored.
 
     double damping{0.0};
     ParseScalarAttribute(node, "damping", &damping);
@@ -323,7 +337,6 @@ class MujocoParser {
       return;
     }
 
-    WarnUnsupportedAttribute(*node, "class");
     WarnUnsupportedAttribute(*node, "group");
     WarnUnsupportedAttribute(*node, "springdamper");
     WarnUnsupportedAttribute(*node, "solreflimit");
@@ -340,6 +353,48 @@ class MujocoParser {
     WarnUnsupportedAttribute(*node, "frictionloss");
     WarnUnsupportedAttribute(*node, "user");
   }
+
+  // Computes the spatial inertia for a shape given the assumption of unit
+  // density.
+  class InertiaCalculator final : public geometry::ShapeReifier {
+   public:
+    DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(InertiaCalculator);
+    // The reifier aliases the pre-computed mesh spatial inertias. When looking
+    // up mesh inertias, it uses the mujoco geometry _name_ and not the
+    // mesh filename.
+    InertiaCalculator(
+        const std::map<std::string, SpatialInertia<double>>* mesh_inertia,
+        std::string name)
+        : mesh_inertia_(*mesh_inertia),
+          name_(std::move(name)) {
+      DRAKE_DEMAND(mesh_inertia != nullptr);
+    }
+
+    SpatialInertia<double> Calc(const geometry::Shape& shape) {
+      shape.Reify(this);
+      return M_GG_G_;
+    }
+
+    using geometry::ShapeReifier::ImplementGeometry;
+
+    void ImplementGeometry(const geometry::Mesh&, void*) final {
+      DRAKE_DEMAND(mesh_inertia_.count(name_) == 1);
+      M_GG_G_ = mesh_inertia_.at(name_);
+    }
+
+    void ImplementGeometry(const geometry::HalfSpace&, void*) final {
+      // Do nothing; leave M_GG_G_ default initialized.
+    }
+
+    void DefaultImplementGeometry(const geometry::Shape& shape) final {
+      M_GG_G_ = CalcSpatialInertia(shape, 1.0 /* density */);
+    }
+
+   private:
+    const std::map<std::string, SpatialInertia<double>>& mesh_inertia_;
+    std::string name_;
+    SpatialInertia<double> M_GG_G_;
+  };
 
   SpatialInertia<double> ParseInertial(XMLElement* node) {
     // We use F to denote the "inertial frame" in the MujoCo documentation.  B
@@ -447,7 +502,6 @@ class MujocoParser {
     if (type == "plane") {
       // We interpret the MuJoCo infinite plane as a half-space.
       geom.shape = std::make_unique<geometry::HalfSpace>();
-      // No inertia; can only be static geometry.
     } else if (type == "sphere") {
       if (size.size() < 1) {
         Error(*node,
@@ -456,7 +510,6 @@ class MujocoParser {
         return geom;
       }
       geom.shape = std::make_unique<geometry::Sphere>(size[0]);
-      unit_M_GG_G = multibody::UnitInertia<double>::SolidSphere(size[0]);
     } else if (type == "capsule") {
       if (has_fromto) {
         if (size.size() < 1) {
@@ -467,8 +520,6 @@ class MujocoParser {
         }
         double length = (fromto.head<3>() - fromto.tail<3>()).norm();
         geom.shape = std::make_unique<geometry::Capsule>(size[0], length);
-        unit_M_GG_G =
-            multibody::UnitInertia<double>::SolidCapsule(size[0], length);
 
       } else {
         if (size.size() < 2) {
@@ -478,8 +529,6 @@ class MujocoParser {
           return geom;
         }
         geom.shape = std::make_unique<geometry::Capsule>(size[0], 2 * size[1]);
-        unit_M_GG_G =
-            multibody::UnitInertia<double>::SolidCapsule(size[0], 2 * size[1]);
       }
     } else if (type == "ellipsoid") {
       if (has_fromto) {
@@ -498,8 +547,6 @@ class MujocoParser {
         }
         geom.shape =
             std::make_unique<geometry::Ellipsoid>(size[0], size[1], size[2]);
-        unit_M_GG_G = multibody::UnitInertia<double>::SolidEllipsoid(
-            size[0], size[1], size[2]);
       }
     } else if (type == "cylinder") {
       if (has_fromto) {
@@ -511,8 +558,6 @@ class MujocoParser {
         }
         double length = (fromto.head<3>() - fromto.tail<3>()).norm();
         geom.shape = std::make_unique<geometry::Cylinder>(size[0], length);
-        unit_M_GG_G =
-            multibody::UnitInertia<double>::SolidCylinder(size[0], length);
       } else {
         if (size.size() < 2) {
           Error(*node,
@@ -521,8 +566,6 @@ class MujocoParser {
           return geom;
         }
         geom.shape = std::make_unique<geometry::Cylinder>(size[0], 2 * size[1]);
-        unit_M_GG_G =
-            multibody::UnitInertia<double>::SolidCylinder(size[0], 2 * size[1]);
       }
     } else if (type == "box") {
       if (has_fromto) {
@@ -541,8 +584,6 @@ class MujocoParser {
         }
         geom.shape = std::make_unique<geometry::Box>(
             size[0] * 2.0, size[1] * 2.0, size[2] * 2.0);
-        unit_M_GG_G = multibody::UnitInertia<double>::SolidBox(
-            size[0] * 2.0, size[1] * 2.0, size[2] * 2.0);
       }
     } else if (type == "mesh") {
       if (!ParseStringAttribute(node, "mesh", &mesh)) {
@@ -553,30 +594,6 @@ class MujocoParser {
       }
       if (mesh_.count(mesh)) {
         geom.shape = mesh_.at(mesh)->Clone();
-        if (compute_inertia) {
-          // TODO(russt): Compute the proper unit inertia for the mesh geometry
-          // (#18314). For now, we compute an OBB for the mesh and take the
-          // unit inertia of the corresponding box.
-
-          // At least so far, we have a surface mesh for every mesh.
-          DRAKE_ASSERT(surface_mesh_.count(mesh) == 1);
-          const geometry::TriangleSurfaceMesh<double>& surface_mesh =
-              surface_mesh_.at(mesh);
-          std::set<int> v;
-          for (int i = 0; i < surface_mesh.num_vertices(); ++i) {
-            v.insert(v.end(), i);
-          }
-          // TODO(russt): The ObbMaker should really make it easier to "use all
-          // the vertices".
-          const geometry::internal::Obb obb =
-              geometry::internal::ObbMaker(surface_mesh, v).Compute();
-          UnitInertia<double> unit_M_GBox_Box =
-              multibody::UnitInertia<double>::SolidBox(
-                  obb.half_width()[0] * 2.0, obb.half_width()[1] * 2.0,
-                  obb.half_width()[2] * 2.0);
-          unit_M_GG_G = unit_M_GBox_Box.ReExpress(obb.pose().rotation())
-                            .ShiftFromCenterOfMass(-obb.pose().translation());
-        }
       } else {
         Warning(
             *node,
@@ -682,20 +699,19 @@ class MujocoParser {
     WarnUnsupportedAttribute(*node, "user");
 
     if (compute_inertia) {
-      double mass, density{1000};
+      SpatialInertia<double> M_GG_G_one =
+          InertiaCalculator(&mesh_inertia_, mesh).Calc(*geom.shape);
+      double mass{};
       if (!ParseScalarAttribute(node, "mass", &mass)) {
+        double density{1000};
         ParseScalarAttribute(node, "density", &density);
-        if (type == "mesh") {
-          // At least so far, we have a surface mesh for every mesh.
-          DRAKE_ASSERT(surface_mesh_.count(mesh) == 1);
-          mass = density *
-                 geometry::internal::CalcEnclosedVolume(surface_mesh_.at(mesh));
-        } else {
-          mass = density * geometry::CalcVolume(*geom.shape);
-        }
+        // M_GG_G_one was calculated with ρ₁ = 1 which produced mass m₁. Actual
+        // density is ρₐ. We have the following ratio: mₐ / m₁ = ρₐ / ρ₁.
+        // So, mₐ = m₁⋅(ρₐ / ρ₁) = m₁⋅(ρₐ / 1) = m₁⋅ρₐ.
+        mass = M_GG_G_one.get_mass() * density;
       }
-      multibody::SpatialInertia<double> M_GG_G(mass, Vector3d::Zero(),
-                                               unit_M_GG_G);
+      SpatialInertia<double> M_GG_G(mass, M_GG_G_one.get_com(),
+                                    M_GG_G_one.get_unit_inertia());
       geom.M_GBo_B = M_GG_G.ReExpress(geom.X_BG.rotation())
                          .Shift(-geom.X_BG.translation());
     }
@@ -783,10 +799,10 @@ class MujocoParser {
               fmt::format("{}{}", body_name, dummy_bodies++), model_instance_,
               SpatialInertia<double>(0, {0, 0, 0}, {0, 0, 0}));
           ParseJoint(joint_node, *last_body, dummy_body, X_WP,
-                     RigidTransformd());
+                     RigidTransformd(), child_class);
           last_body = &dummy_body;
         } else {
-          ParseJoint(joint_node, *last_body, body, X_WB, X_PB);
+          ParseJoint(joint_node, *last_body, body, X_WB, X_PB, child_class);
         }
 
         std::string type;
@@ -877,6 +893,17 @@ class MujocoParser {
           default_geometry_.count(parent_default) > 0) {
         ApplyDefaultAttributes(*default_geometry_.at(parent_default),
                                geom_node);
+      }
+    }
+
+    // Parse default joints.
+    for (XMLElement* joint_node = node->FirstChildElement("joint"); joint_node;
+         joint_node = joint_node->NextSiblingElement("joint")) {
+      default_joint_[class_name] = joint_node;
+      if (!parent_default.empty() &&
+          default_joint_.count(parent_default) > 0) {
+        ApplyDefaultAttributes(*default_joint_.at(parent_default),
+                               joint_node);
       }
     }
 
@@ -989,9 +1016,7 @@ class MujocoParser {
 
         if (std::filesystem::exists(filename)) {
           mesh_[name] = std::make_unique<geometry::Mesh>(filename, scale[0]);
-          surface_mesh_.emplace(std::pair(
-              name,
-              geometry::ReadObjToTriangleSurfaceMesh(filename, scale[0])));
+          mesh_inertia_[name] = CalcSpatialInertia(*mesh_[name], 1);
         } else if (std::filesystem::exists(original_filename)) {
           Warning(
               *node,
@@ -1278,10 +1303,11 @@ class MujocoParser {
 
   // Assets without an absolute path are referenced relative to the "main MJCF
   // model file" path, `main_mjcf_path`.
-  std::optional<ModelInstanceIndex> Parse(const std::string& model_name_in,
-                           const std::optional<std::string>& parent_model_name,
-                           XMLDocument* xml_doc,
-                           const std::filesystem::path& main_mjcf_path) {
+  std::pair<std::optional<ModelInstanceIndex>, std::string> Parse(
+      const std::string& model_name_in,
+      const std::optional<std::string>& parent_model_name,
+      std::optional<ModelInstanceIndex> merge_into_model_instance,
+      XMLDocument* xml_doc, const std::filesystem::path& main_mjcf_path) {
     main_mjcf_path_ = main_mjcf_path;
 
     XMLElement* node = xml_doc->FirstChildElement("mujoco");
@@ -1298,8 +1324,13 @@ class MujocoParser {
             "must be specified.");
       return {};
     }
-    model_name = MakeModelName(model_name, parent_model_name, workspace_);
-    model_instance_ = plant_->AddModelInstance(model_name);
+
+    if (!merge_into_model_instance.has_value()) {
+      model_name = MakeModelName(model_name, parent_model_name, workspace_);
+      model_instance_ = plant_->AddModelInstance(model_name);
+    } else {
+      model_instance_ = *merge_into_model_instance;
+    }
 
     // Parse the compiler parameters.
     for (XMLElement* compiler_node = node->FirstChildElement("compiler");
@@ -1363,7 +1394,7 @@ class MujocoParser {
     WarnUnsupportedElement(*node, "sensor");
     WarnUnsupportedElement(*node, "keyframe");
 
-    return model_instance_;
+    return std::make_pair(model_instance_, model_name);
   }
 
   void Warning(const XMLNode& location, std::string message) const {
@@ -1394,20 +1425,22 @@ class MujocoParser {
   enum Angle { kRadian, kDegree };
   Angle angle_{kDegree};
   std::map<std::string, XMLElement*> default_geometry_{};
+  std::map<std::string, XMLElement*> default_joint_{};
   enum InertiaFromGeometry { kFalse, kTrue, kAuto };
   InertiaFromGeometry inertia_from_geom_{kAuto};
   std::map<std::string, XMLElement*> material_{};
   std::optional<std::filesystem::path> meshdir_{};
   std::map<std::string, std::unique_ptr<geometry::Mesh>> mesh_{};
-  std::map<std::string, geometry::TriangleSurfaceMesh<double>> surface_mesh_{};
+  // Spatial inertia of mesh assets assuming density = 1.
+  std::map<std::string, SpatialInertia<double>> mesh_inertia_;
 };
 
-}  // namespace
-
-std::optional<ModelInstanceIndex> AddModelFromMujocoXml(
+std::pair<std::optional<ModelInstanceIndex>, std::string>
+AddOrMergeModelFromMujocoXml(
     const DataSource& data_source, const std::string& model_name_in,
     const std::optional<std::string>& parent_model_name,
-    const ParsingWorkspace& workspace) {
+    const ParsingWorkspace& workspace,
+    std::optional<ModelInstanceIndex> merge_into_model_instance) {
   DRAKE_THROW_UNLESS(!workspace.plant->is_finalized());
 
   TinyXml2Diagnostic diag(&workspace.diagnostic, &data_source);
@@ -1434,7 +1467,18 @@ std::optional<ModelInstanceIndex> AddModelFromMujocoXml(
   }
 
   MujocoParser parser(workspace, data_source);
-  return parser.Parse(model_name_in, parent_model_name, &xml_doc, path);
+  return parser.Parse(model_name_in, parent_model_name,
+                      merge_into_model_instance, &xml_doc, path);
+}
+}  // namespace
+
+std::optional<ModelInstanceIndex> AddModelFromMujocoXml(
+    const DataSource& data_source, const std::string& model_name_in,
+    const std::optional<std::string>& parent_model_name,
+    const ParsingWorkspace& workspace) {
+  return AddOrMergeModelFromMujocoXml(data_source, model_name_in,
+                                      parent_model_name, workspace,
+                                      std::nullopt).first;
 }
 
 MujocoParserWrapper::MujocoParserWrapper() {}
@@ -1448,6 +1492,16 @@ std::optional<ModelInstanceIndex> MujocoParserWrapper::AddModel(
   return AddModelFromMujocoXml(data_source, model_name, parent_model_name,
                                workspace);
 }
+
+std::string MujocoParserWrapper::MergeModel(
+    const DataSource& data_source, const std::string& model_name,
+    ModelInstanceIndex merge_into_model_instance,
+    const ParsingWorkspace& workspace) {
+  return AddOrMergeModelFromMujocoXml(data_source, model_name, std::nullopt,
+                                      workspace, merge_into_model_instance)
+      .second;
+}
+
 
 std::vector<ModelInstanceIndex> MujocoParserWrapper::AddAllModels(
     const DataSource& data_source,

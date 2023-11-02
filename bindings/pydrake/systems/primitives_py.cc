@@ -1,7 +1,3 @@
-#include "pybind11/eigen.h"
-#include "pybind11/pybind11.h"
-#include "pybind11/stl.h"
-
 #include "drake/bindings/pydrake/common/cpp_template_pybind.h"
 #include "drake/bindings/pydrake/common/default_scalars_pybind.h"
 #include "drake/bindings/pydrake/common/eigen_pybind.h"
@@ -102,6 +98,11 @@ PYBIND11_MODULE(primitives, m) {
         .def("y0",
             overload_cast_explicit<const VectorXd&>(&AffineSystem<T>::y0),
             doc.AffineSystem.y0.doc)
+        .def("UpdateCoefficients", &AffineSystem<T>::UpdateCoefficients,
+            py::arg("A") = Eigen::MatrixXd(), py::arg("B") = Eigen::MatrixXd(),
+            py::arg("f0") = Eigen::VectorXd(), py::arg("C") = Eigen::MatrixXd(),
+            py::arg("D") = Eigen::MatrixXd(), py::arg("y0") = Eigen::VectorXd(),
+            doc.AffineSystem.UpdateCoefficients.doc)
         // Wrap a few methods from the TimeVaryingAffineSystem parent class.
         // TODO(russt): Move to TimeVaryingAffineSystem if/when that class is
         // wrapped.
@@ -151,19 +152,19 @@ PYBIND11_MODULE(primitives, m) {
     DefineTemplateClassWithDefault<DiscreteTimeDelay<T>, LeafSystem<T>>(
         m, "DiscreteTimeDelay", GetPyParam<T>(), doc.DiscreteTimeDelay.doc)
         .def(py::init<double, int, int>(), py::arg("update_sec"),
-            py::arg("delay_timesteps"), py::arg("vector_size"),
+            py::arg("delay_time_steps"), py::arg("vector_size"),
             doc.DiscreteTimeDelay.ctor
-                .doc_3args_update_sec_delay_timesteps_vector_size)
+                .doc_3args_update_sec_delay_time_steps_vector_size)
         .def(py::init<double, int, const AbstractValue&>(),
-            py::arg("update_sec"), py::arg("delay_timesteps"),
+            py::arg("update_sec"), py::arg("delay_time_steps"),
             py::arg("abstract_model_value"),
             doc.DiscreteTimeDelay.ctor
-                .doc_3args_update_sec_delay_timesteps_abstract_model_value);
+                .doc_3args_update_sec_delay_time_steps_abstract_model_value);
 
     DefineTemplateClassWithDefault<DiscreteDerivative<T>, LeafSystem<T>>(
         m, "DiscreteDerivative", GetPyParam<T>(), doc.DiscreteDerivative.doc)
         .def(py::init<int, double, bool>(), py::arg("num_inputs"),
-            py::arg("time_step"), py::arg("suppress_initial_transient") = false,
+            py::arg("time_step"), py::arg("suppress_initial_transient") = true,
             doc.DiscreteDerivative.ctor.doc)
         .def("time_step", &DiscreteDerivative<T>::time_step,
             doc.DiscreteDerivative.time_step.doc)
@@ -386,7 +387,7 @@ PYBIND11_MODULE(primitives, m) {
         Diagram<T>>(m, "StateInterpolatorWithDiscreteDerivative",
         GetPyParam<T>(), doc.StateInterpolatorWithDiscreteDerivative.doc)
         .def(py::init<int, double, bool>(), py::arg("num_positions"),
-            py::arg("time_step"), py::arg("suppress_initial_transient") = false,
+            py::arg("time_step"), py::arg("suppress_initial_transient") = true,
             doc.StateInterpolatorWithDiscreteDerivative.ctor.doc)
         .def("suppress_initial_transient",
             &StateInterpolatorWithDiscreteDerivative<
@@ -565,12 +566,25 @@ PYBIND11_MODULE(primitives, m) {
 
     DefineTemplateClassWithDefault<ZeroOrderHold<T>, LeafSystem<T>>(
         m, "ZeroOrderHold", GetPyParam<T>(), doc.ZeroOrderHold.doc)
-        .def(py::init<double, int>(), py::arg("period_sec"),
-            py::arg("vector_size"),
-            doc.ZeroOrderHold.ctor.doc_2args_period_sec_vector_size)
-        .def(py::init<double, const AbstractValue&>(), py::arg("period_sec"),
-            py::arg("abstract_model_value"),
-            doc.ZeroOrderHold.ctor.doc_2args_period_sec_abstract_model_value);
+        .def(py::init<double, int, double>(), py::arg("period_sec"),
+            py::arg("vector_size"), py::arg("offset_sec") = 0.0,
+            doc.ZeroOrderHold.ctor.doc_3args_period_sec_vector_size_offset_sec)
+        .def(py::init<double, const AbstractValue&, double>(),
+            py::arg("period_sec"), py::arg("abstract_model_value"),
+            py::arg("offset_sec") = 0.0,
+            doc.ZeroOrderHold.ctor
+                .doc_3args_period_sec_abstract_model_value_offset_sec)
+        .def("period", &ZeroOrderHold<T>::period, doc.ZeroOrderHold.period.doc)
+        .def("offset", &ZeroOrderHold<T>::offset, doc.ZeroOrderHold.offset.doc);
+
+    DefineTemplateClassWithDefault<TrajectorySource<T>, LeafSystem<T>>(
+        m, "TrajectorySource", GetPyParam<T>(), doc.TrajectorySource.doc)
+        .def(py::init<const trajectories::Trajectory<T>&, int, bool>(),
+            py::arg("trajectory"), py::arg("output_derivative_order") = 0,
+            py::arg("zero_derivatives_beyond_limits") = true,
+            doc.TrajectorySource.ctor.doc)
+        .def("UpdateTrajectory", &TrajectorySource<T>::UpdateTrajectory,
+            py::arg("trajectory"), doc.TrajectorySource.UpdateTrajectory.doc);
   };
   type_visit(bind_common_scalar_types, CommonScalarPack{});
 
@@ -720,15 +734,6 @@ PYBIND11_MODULE(primitives, m) {
           py::arg("num_outputs"), py::arg("sampling_interval_sec"),
           doc.RandomSource.ctor.doc);
 
-  py::class_<TrajectorySource<double>, LeafSystem<double>>(
-      m, "TrajectorySource", doc.TrajectorySource.doc)
-      .def(py::init<const trajectories::Trajectory<double>&, int, bool>(),
-          py::arg("trajectory"), py::arg("output_derivative_order") = 0,
-          py::arg("zero_derivatives_beyond_limits") = true,
-          doc.TrajectorySource.ctor.doc)
-      .def("UpdateTrajectory", &TrajectorySource<double>::UpdateTrajectory,
-          py::arg("trajectory"), doc.TrajectorySource.UpdateTrajectory.doc);
-
   m.def("AddRandomInputs", &AddRandomInputs<double>,
        py::arg("sampling_interval_sec"), py::arg("builder"),
        doc.AddRandomInputs.doc)
@@ -762,6 +767,12 @@ PYBIND11_MODULE(primitives, m) {
 
   m.def("IsObservable", &IsObservable, py::arg("sys"),
       py::arg("threshold") = std::nullopt, doc.IsObservable.doc);
+
+  m.def("IsStabilizable", &IsStabilizable, py::arg("sys"),
+      py::arg("threshold") = std::nullopt, doc.IsStabilizable.doc);
+
+  m.def("IsDetectable", &IsDetectable, py::arg("sys"),
+      py::arg("threshold") = std::nullopt, doc.IsDetectable.doc);
 }  // NOLINT(readability/fn_size)
 
 }  // namespace pydrake

@@ -13,6 +13,18 @@
 
 namespace drake {
 namespace geometry {
+namespace {
+
+std::string GetExtensionLower(const std::string& filename) {
+  std::filesystem::path file_path(filename);
+  std::string ext = file_path.extension();
+  std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) {
+    return std::tolower(c);
+  });
+  return ext;
+}
+
+}  // namespace
 
 using math::RigidTransform;
 
@@ -75,6 +87,7 @@ Capsule::Capsule(const Vector2<double>& measures)
 Convex::Convex(const std::string& filename, double scale)
     : Shape(ShapeTag<Convex>()),
       filename_(std::filesystem::absolute(filename)),
+      extension_(GetExtensionLower(filename_)),
       scale_(scale) {
   if (std::abs(scale) < 1e-8) {
     throw std::logic_error("Convex |scale| cannot be < 1e-8.");
@@ -145,6 +158,7 @@ RigidTransform<double> HalfSpace::MakePose(const Vector3<double>& Hz_dir_F,
 Mesh::Mesh(const std::string& filename, double scale)
     : Shape(ShapeTag<Mesh>()),
       filename_(std::filesystem::absolute(filename)),
+      extension_(GetExtensionLower(filename_)),
       scale_(scale) {
   if (std::abs(scale) < 1e-8) {
     throw std::logic_error("Mesh |scale| cannot be < 1e-8.");
@@ -174,40 +188,44 @@ Sphere::Sphere(double radius)
 
 ShapeReifier::~ShapeReifier() = default;
 
-void ShapeReifier::ImplementGeometry(const Box&, void*) {
-  ThrowUnsupportedGeometry("Box");
+void ShapeReifier::ImplementGeometry(const Box& box, void*) {
+  DefaultImplementGeometry(box);
 }
 
-void ShapeReifier::ImplementGeometry(const Capsule&, void*) {
-  ThrowUnsupportedGeometry("Capsule");
+void ShapeReifier::ImplementGeometry(const Capsule& capsule, void*) {
+  DefaultImplementGeometry(capsule);
 }
 
-void ShapeReifier::ImplementGeometry(const Convex&, void*) {
-  ThrowUnsupportedGeometry("Convex");
+void ShapeReifier::ImplementGeometry(const Convex& convex, void*) {
+  DefaultImplementGeometry(convex);
 }
 
-void ShapeReifier::ImplementGeometry(const Cylinder&, void*) {
-  ThrowUnsupportedGeometry("Cylinder");
+void ShapeReifier::ImplementGeometry(const Cylinder& cylinder, void*) {
+  DefaultImplementGeometry(cylinder);
 }
 
-void ShapeReifier::ImplementGeometry(const Ellipsoid&, void*) {
-  ThrowUnsupportedGeometry("Ellipsoid");
+void ShapeReifier::ImplementGeometry(const Ellipsoid& ellipsoid, void*) {
+  DefaultImplementGeometry(ellipsoid);
 }
 
-void ShapeReifier::ImplementGeometry(const HalfSpace&, void*) {
-  ThrowUnsupportedGeometry("HalfSpace");
+void ShapeReifier::ImplementGeometry(const HalfSpace& hs, void*) {
+  DefaultImplementGeometry(hs);
 }
 
-void ShapeReifier::ImplementGeometry(const Mesh&, void*) {
-  ThrowUnsupportedGeometry("Mesh");
+void ShapeReifier::ImplementGeometry(const Mesh& mesh, void*) {
+  DefaultImplementGeometry(mesh);
 }
 
-void ShapeReifier::ImplementGeometry(const MeshcatCone&, void*) {
-  ThrowUnsupportedGeometry("MeshcatCone");
+void ShapeReifier::ImplementGeometry(const MeshcatCone& cone, void*) {
+  DefaultImplementGeometry(cone);
 }
 
-void ShapeReifier::ImplementGeometry(const Sphere&, void*) {
-  ThrowUnsupportedGeometry("Sphere");
+void ShapeReifier::ImplementGeometry(const Sphere& sphere, void*) {
+  DefaultImplementGeometry(sphere);
+}
+
+void ShapeReifier::DefaultImplementGeometry(const Shape& shape) {
+  ThrowUnsupportedGeometry(ShapeName(shape).name());
 }
 
 void ShapeReifier::ThrowUnsupportedGeometry(const std::string& shape_name) {
