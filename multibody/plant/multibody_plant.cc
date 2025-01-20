@@ -4193,6 +4193,9 @@ DRAKE_DEFINE_FUNCTION_TEMPLATE_INSTANTIATIONS_ON_DEFAULT_SCALARS((
         std::unique_ptr<geometry::SceneGraph<T>>)>(
         &AddMultibodyPlantSceneGraph)));
 
+template MultibodyPlant<AutoDiffXd>::MultibodyPlant(const
+MultibodyPlant<double>&);
+
 }  // namespace multibody
 }  // namespace drake
 

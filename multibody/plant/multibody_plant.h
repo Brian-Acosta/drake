@@ -4423,7 +4423,7 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
   /// @see CalcJacobianPositionVector() for details on Jq_p_AoBi.
   /// @see See @ref Jacobian_functions "Jacobian functions" for related
   /// functions.
-  void CalcJacobianTranslationalVelocity(
+  virtual void CalcJacobianTranslationalVelocity(
       const systems::Context<T>& context, JacobianWrtVariable with_respect_to,
       const Frame<T>& frame_B, const Eigen::Ref<const Matrix3X<T>>& p_BoBi_B,
       const Frame<T>& frame_A, const Frame<T>& frame_E,
